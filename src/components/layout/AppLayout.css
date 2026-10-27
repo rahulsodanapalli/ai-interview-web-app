@@ -1,0 +1,39 @@
+/* ─── App Layout ────────────────────────────────────────────────────────────── */
+
+.app-layout {
+  display: flex;
+  min-height: 100vh;
+}
+
+.app-main {
+  flex: 1;
+  margin-left: var(--sidebar-width);
+  display: flex;
+  flex-direction: column;
+  min-height: 100vh;
+  transition: margin-left var(--transition-normal);
+}
+
+/* When sidebar is collapsed via CSS class bubbled up */
+.sidebar.collapsed ~ .app-main,
+.app-layout:has(.sidebar.collapsed) .app-main {
+  margin-left: var(--sidebar-collapsed-width);
+}
+
+.app-content {
+  flex: 1;
+  padding: 32px;
+  animation: fade-in 0.3s ease-out;
+}
+
+/* ─── Mobile ────────────────────────────────────────────────────────────────── */
+
+@media (max-width: 768px) {
+  .app-main {
+    margin-left: 0 !important;
+  }
+
+  .app-content {
+    padding: 20px 16px;
+  }
+}
