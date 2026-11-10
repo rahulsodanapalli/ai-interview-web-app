@@ -5,6 +5,9 @@ import StartInterview from './pages/StartInterview/StartInterview';
 import InterviewPractice from './pages/InterviewPractice/InterviewPractice';
 import EvaluationResults from './pages/EvaluationResults/EvaluationResults';
 import InterviewHistory from './pages/InterviewHistory/InterviewHistory';
+import DocumentRAG from './pages/DocumentRAG/DocumentRAG';
+import GitHubAnalysis from './pages/GitHubAnalysis/GitHubAnalysis';
+import Settings from './pages/Settings/Settings';
 
 /**
  * Root application component with client-side routing.
@@ -17,11 +20,16 @@ export default function App() {
         <Route element={<AppLayout />}>
           <Route path="/" element={<Dashboard />} />
           <Route path="/start" element={<StartInterview />} />
+          <Route path="/rag" element={<DocumentRAG />} />
+          <Route path="/source" element={<DocumentRAG />} />
+          <Route path="/github" element={<GitHubAnalysis />} />
           <Route path="/practice" element={<InterviewHistory />} />
           <Route path="/practice/:sessionId" element={<InterviewPractice />} />
           <Route path="/results" element={<EvaluationResults />} />
+          <Route path="/results/:sessionId" element={<EvaluationResults />} />
           <Route path="/history" element={<InterviewHistory />} />
           <Route path="/history/:sessionId" element={<InterviewHistory />} />
+          <Route path="/settings" element={<Settings />} />
         </Route>
       </Routes>
     </BrowserRouter>

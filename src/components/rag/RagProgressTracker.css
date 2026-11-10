@@ -1,0 +1,124 @@
+.rag-progress-card {
+  padding: 18px 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.rag-progress-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.rag-progress-title {
+  font-size: 0.9375rem;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.rag-progress-subtitle {
+  font-size: 0.75rem;
+  color: var(--text-muted);
+  margin-top: 2px;
+}
+
+.rag-stage-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.rag-stage-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+}
+
+.rag-stage-indicator {
+  width: 22px;
+  height: 22px;
+  border-radius: var(--radius-full);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  margin-top: 1px;
+  border: 1px solid var(--border-default);
+  background: var(--surface-subtle);
+  color: var(--text-muted);
+}
+
+.rag-stage-item.status-active .rag-stage-indicator {
+  border-color: var(--color-primary-500);
+  background: rgba(99, 102, 241, 0.1);
+  color: var(--color-primary-600);
+}
+
+[data-theme="dark"] .rag-stage-item.status-active .rag-stage-indicator {
+  color: var(--color-primary-400);
+}
+
+.rag-stage-item.status-completed .rag-stage-indicator {
+  border-color: var(--color-success);
+  background: var(--color-success-bg);
+  color: var(--color-success-text);
+}
+
+.rag-stage-item.status-error .rag-stage-indicator {
+  border-color: var(--color-error);
+  background: var(--color-error-bg);
+  color: var(--color-error-text);
+}
+
+.rag-stage-spinner {
+  width: 12px;
+  height: 12px;
+  border: 2px solid currentColor;
+  border-right-color: transparent;
+  border-radius: 50%;
+  animation: spin 0.75s linear infinite;
+}
+
+.rag-stage-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--text-muted);
+  opacity: 0.45;
+}
+
+.rag-stage-content {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.rag-stage-label {
+  font-size: 0.8125rem;
+  font-weight: 500;
+  color: var(--text-secondary);
+}
+
+.rag-stage-item.status-active .rag-stage-label,
+.rag-stage-item.status-completed .rag-stage-label {
+  color: var(--text-primary);
+  font-weight: 600;
+}
+
+.rag-stage-item.status-error .rag-stage-label {
+  color: var(--color-error-text);
+  font-weight: 600;
+}
+
+.rag-stage-detail {
+  font-size: 0.75rem;
+  color: var(--text-muted);
+  line-height: 1.4;
+}
+

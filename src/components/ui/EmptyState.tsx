@@ -1,37 +1,45 @@
+import type { ReactNode } from 'react';
 import './EmptyState.css';
 
 interface EmptyStateProps {
-  /** Large emoji or icon */
-  icon?: string;
-  /** Title text */
+  icon?: ReactNode;
   title: string;
-  /** Description text */
   description?: string;
-  /** Optional CTA */
   action?: {
+    label: string;
+    onClick: () => void;
+  };
+  secondaryAction?: {
     label: string;
     onClick: () => void;
   };
 }
 
-/**
- * Reusable empty state for lists and sections with no data.
- */
 export default function EmptyState({
-  icon = '📭',
+  icon,
   title,
   description,
   action,
+  secondaryAction,
 }: EmptyStateProps) {
   return (
-    <div className="empty-state animate-fade-in" id="empty-state">
-      <div className="empty-icon">{icon}</div>
+    <div className="empty-state surface-card animate-fade-in" id="empty-state">
+      {icon && <div className="empty-icon-box">{icon}</div>}
       <h3 className="empty-title">{title}</h3>
       {description && <p className="empty-description">{description}</p>}
-      {action && (
-        <button className="btn btn-primary btn-sm" onClick={action.onClick} id="empty-state-action">
-          {action.label}
-        </button>
+      {(action || secondaryAction) && (
+        <div className="empty-actions">
+          {action && (
+            <button type="button" className="btn btn-primary btn-sm" onClick={action.onClick} id="empty-state-action">
+              {action.label}
+            </button>
+          )}
+          {secondaryAction && (
+            <button type="button" className="btn btn-secondary btn-sm" onClick={secondaryAction.onClick}>
+              {secondaryAction.label}
+            </button>
+          )}
+        </div>
       )}
     </div>
   );

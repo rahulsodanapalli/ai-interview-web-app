@@ -10,7 +10,7 @@
 // ─── Enums ───────────────────────────────────────────────────────────────────
 
 /** Candidate experience level — maps to backend ExperienceLevel enum */
-export type ExperienceLevel = 'Fresher' | 'Junior' | 'Mid-Level' | 'Senior';
+export type ExperienceLevel = 'Fresher' | 'Junior' | 'Mid-Level' | 'Senior' | 'Intermediate';
 
 /** Question difficulty level — maps to backend DifficultyLevel enum */
 export type DifficultyLevel = 'Easy' | 'Medium' | 'Hard';

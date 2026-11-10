@@ -26,7 +26,17 @@ export type SessionStatus = 'in_progress' | 'completed';
 
 // ─── Session Creation ────────────────────────────────────────────────────────
 
-/** POST /api/v1/interview/sessions — request body */
+/** Pre-generated question input to initialize a session */
+export interface SessionQuestionInput {
+  id?: string;
+  question: string;
+  expected_answer_points: string[];
+  follow_up_question?: string | null;
+  difficulty?: DifficultyLevel;
+  topic?: string;
+}
+
+/** POST /api/v1/interview/sessions and POST /api/v1/sources/sessions — request body */
 export interface CreateSessionRequest {
   role: string;
   experience_level: ExperienceLevel;
@@ -34,6 +44,8 @@ export interface CreateSessionRequest {
   topic: string;
   question_type: QuestionType;
   total_questions?: number; // defaults to 5, range 1–20
+  source_id?: string;
+  questions?: SessionQuestionInput[];
 }
 
 // ─── Session Question Item ───────────────────────────────────────────────────
@@ -55,6 +67,7 @@ export interface SessionQuestionItem {
 /**
  * Full session detail — returned by:
  *   POST /api/v1/interview/sessions (201)
+ *   POST /api/v1/sources/sessions (201)
  *   GET  /api/v1/interview/sessions (200, as array)
  *   GET  /api/v1/interview/sessions/:session_id (200)
  */
@@ -68,6 +81,7 @@ export interface SessionDetailResponse {
   total_questions: number;
   completed_questions: number;
   current_question_number: number;
+  source_id?: string | null;
   status: SessionStatus;
   questions: SessionQuestionItem[];
   created_at: string;

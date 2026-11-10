@@ -1,0 +1,11 @@
+.github-search-section,
+.github-workspace,
+.github-tab-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.github-generating-card {
+  padding: 16px;
+}

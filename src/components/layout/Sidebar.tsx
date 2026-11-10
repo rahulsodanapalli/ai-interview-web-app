@@ -1,128 +1,185 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useEffect, type ComponentType } from 'react';
 import { NavLink, useLocation } from 'react-router-dom';
+import {
+  DashboardIcon,
+  SparklesIcon,
+  FileTextIcon,
+  GitBranchIcon,
+  HistoryIcon,
+  SettingsIcon,
+  ChevronLeftIcon,
+  XIcon,
+  TerminalIcon,
+} from '../ui/Icons';
 import './Sidebar.css';
 
-/** Navigation item definition */
 interface NavItem {
   path: string;
   label: string;
-  icon: string;
+  icon: ComponentType<{ size?: number }>;
+  matchPaths?: string[];
 }
 
-const navItems: NavItem[] = [
-  { path: '/', label: 'Dashboard', icon: '📊' },
-  { path: '/start', label: 'Start Interview', icon: '🚀' },
-  { path: '/practice', label: 'Interview Practice', icon: '💡' },
-  { path: '/results', label: 'Evaluation Results', icon: '📈' },
-  { path: '/history', label: 'Interview History', icon: '📋' },
+const primaryNavItems: NavItem[] = [
+  { path: '/', label: 'Dashboard', icon: DashboardIcon },
+  { path: '/start', label: 'AI Interview', icon: SparklesIcon, matchPaths: ['/start', '/practice'] },
+  { path: '/rag', label: 'Document & GitHub RAG', icon: FileTextIcon, matchPaths: ['/rag', '/source'] },
+  { path: '/github', label: 'GitHub Analysis', icon: GitBranchIcon },
+  { path: '/history', label: 'Interview History', icon: HistoryIcon, matchPaths: ['/history', '/results'] },
 ];
 
-export default function Sidebar() {
-  const [collapsed, setCollapsed] = useState(false);
-  const [mobileOpen, setMobileOpen] = useState(false);
+const secondaryNavItems: NavItem[] = [
+  { path: '/settings', label: 'Settings', icon: SettingsIcon },
+];
+
+interface SidebarProps {
+  collapsed: boolean;
+  mobileOpen: boolean;
+  onToggleCollapse: () => void;
+  onCloseMobile: () => void;
+}
+
+export default function Sidebar({
+  collapsed,
+  mobileOpen,
+  onToggleCollapse,
+  onCloseMobile,
+}: SidebarProps) {
   const location = useLocation();
 
-  // Close mobile menu on route change
   useEffect(() => {
-    setMobileOpen(false);
-  }, [location.pathname]);
+    if (!mobileOpen) return;
 
-  // Close mobile menu on escape key
-  const handleKeyDown = useCallback((e: KeyboardEvent) => {
-    if (e.key === 'Escape') setMobileOpen(false);
-  }, []);
+    function handleKeyDown(e: KeyboardEvent) {
+      if (e.key === 'Escape') {
+        onCloseMobile();
+      }
+    }
 
-  useEffect(() => {
     document.addEventListener('keydown', handleKeyDown);
     return () => document.removeEventListener('keydown', handleKeyDown);
-  }, [handleKeyDown]);
+  }, [mobileOpen, onCloseMobile]);
+
+  function isItemActive(item: NavItem): boolean {
+    if (item.path === '/') {
+      return location.pathname === '/';
+    }
+    if (item.matchPaths) {
+      return item.matchPaths.some(
+        (prefix) => location.pathname === prefix || location.pathname.startsWith(`${prefix}/`)
+      );
+    }
+    return location.pathname === item.path || location.pathname.startsWith(`${item.path}/`);
+  }
 
   return (
     <>
-      {/* Mobile hamburger */}
-      <button
-        id="sidebar-mobile-toggle"
-        className="sidebar-mobile-toggle"
-        onClick={() => setMobileOpen(!mobileOpen)}
-        aria-label="Toggle navigation menu"
-      >
-        <span className={`hamburger ${mobileOpen ? 'open' : ''}`}>
-          <span></span>
-          <span></span>
-          <span></span>
-        </span>
-      </button>
-
-      {/* Overlay for mobile */}
       {mobileOpen && (
         <div
           className="sidebar-overlay"
-          onClick={() => setMobileOpen(false)}
+          onClick={onCloseMobile}
+          aria-hidden="true"
         />
       )}
 
       <aside
         className={`sidebar ${collapsed ? 'collapsed' : ''} ${mobileOpen ? 'mobile-open' : ''}`}
         id="sidebar-nav"
+        aria-label="Primary navigation"
       >
-        {/* Logo area */}
         <div className="sidebar-header">
-          <div className="sidebar-logo">
-            <div className="logo-icon">AI</div>
-            {!collapsed && <span className="logo-text">InterviewPrep</span>}
-          </div>
+          <NavLink to="/" className="sidebar-brand" onClick={onCloseMobile}>
+            <div className="brand-mark" aria-hidden="true">
+              <TerminalIcon size={16} />
+            </div>
+            {!collapsed && (
+              <div className="brand-text-group">
+                <span className="brand-name">InterviewPrep</span>
+                <span className="brand-tag">AI Platform</span>
+              </div>
+            )}
+          </NavLink>
+
           <button
             id="sidebar-collapse-toggle"
+            type="button"
             className="sidebar-collapse-btn"
-            onClick={() => setCollapsed(!collapsed)}
+            onClick={onToggleCollapse}
             aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+            title={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
           >
-            <svg
-              width="16"
-              height="16"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              style={{ transform: collapsed ? 'rotate(180deg)' : 'none', transition: 'transform 0.3s ease' }}
-            >
-              <path d="m15 18-6-6 6-6" />
-            </svg>
+            <ChevronLeftIcon
+              size={15}
+              style={{
+                transform: collapsed ? 'rotate(180deg)' : 'none',
+                transition: 'transform 180ms ease',
+              }}
+            />
+          </button>
+
+          <button
+            type="button"
+            className="sidebar-mobile-close"
+            onClick={onCloseMobile}
+            aria-label="Close navigation menu"
+          >
+            <XIcon size={16} />
           </button>
         </div>
 
-        {/* Navigation links */}
         <nav className="sidebar-nav">
-          <ul className="nav-list">
-            {navItems.map((item) => (
-              <li key={item.path}>
-                <NavLink
-                  to={item.path}
-                  end={item.path === '/'}
-                  className={({ isActive }) =>
-                    `nav-link ${isActive ? 'active' : ''}`
-                  }
-                  id={`nav-${item.label.toLowerCase().replace(/\s+/g, '-')}`}
-                >
-                  <span className="nav-icon">{item.icon}</span>
-                  {!collapsed && <span className="nav-label">{item.label}</span>}
-                </NavLink>
-              </li>
-            ))}
-          </ul>
-        </nav>
+          <div className="nav-section">
+            {!collapsed && <span className="nav-section-label">Workspace</span>}
+            <ul className="nav-list">
+              {primaryNavItems.map((item) => {
+                const Icon = item.icon;
+                const active = isItemActive(item);
+                return (
+                  <li key={item.path}>
+                    <NavLink
+                      to={item.path}
+                      onClick={onCloseMobile}
+                      className={`nav-link ${active ? 'active' : ''}`}
+                      id={`nav-${item.path.replace('/', '') || 'dashboard'}`}
+                      title={collapsed ? item.label : undefined}
+                    >
+                      <span className="nav-icon">
+                        <Icon size={17} />
+                      </span>
+                      {!collapsed && <span className="nav-label">{item.label}</span>}
+                    </NavLink>
+                  </li>
+                );
+              })}
+            </ul>
+          </div>
 
-        {/* Bottom section */}
-        <div className="sidebar-footer">
-          {!collapsed && (
-            <div className="sidebar-version">
-              <span className="version-dot"></span>
-              v1.0.0 · Day 7
-            </div>
-          )}
-        </div>
+          <div className="nav-section nav-section-bottom">
+            {!collapsed && <span className="nav-section-label">System</span>}
+            <ul className="nav-list">
+              {secondaryNavItems.map((item) => {
+                const Icon = item.icon;
+                const active = isItemActive(item);
+                return (
+                  <li key={item.path}>
+                    <NavLink
+                      to={item.path}
+                      onClick={onCloseMobile}
+                      className={`nav-link ${active ? 'active' : ''}`}
+                      id={`nav-${item.path.replace('/', '')}`}
+                      title={collapsed ? item.label : undefined}
+                    >
+                      <span className="nav-icon">
+                        <Icon size={17} />
+                      </span>
+                      {!collapsed && <span className="nav-label">{item.label}</span>}
+                    </NavLink>
+                  </li>
+                );
+              })}
+            </ul>
+          </div>
+        </nav>
       </aside>
     </>
   );

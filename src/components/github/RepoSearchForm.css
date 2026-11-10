@@ -1,0 +1,148 @@
+.repo-search-card {
+  padding: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.repo-search-header {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.repo-search-title {
+  font-size: 0.9375rem;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.repo-search-subtitle {
+  font-size: 0.8125rem;
+  color: var(--text-secondary);
+  line-height: 1.5;
+}
+
+.inline-code-pill {
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+  padding: 2px 6px;
+  border-radius: 4px;
+  background: var(--surface-subtle);
+  border: 1px solid var(--border-subtle);
+  color: var(--text-primary);
+}
+
+.repo-search-form {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.repo-search-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.repo-input-wrap {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+}
+
+.repo-input-icon {
+  position: absolute;
+  left: 12px;
+  color: var(--text-muted);
+  display: flex;
+  align-items: center;
+  pointer-events: none;
+}
+
+.repo-text-input {
+  padding-left: 36px;
+  padding-right: 34px;
+  font-family: var(--font-mono);
+  font-size: 0.8125rem;
+}
+
+.repo-clear-btn {
+  position: absolute;
+  right: 8px;
+  width: 24px;
+  height: 24px;
+  border-radius: var(--radius-sm);
+  border: none;
+  background: transparent;
+  color: var(--text-muted);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+}
+
+.repo-clear-btn:hover {
+  background: var(--surface-subtle);
+  color: var(--text-primary);
+}
+
+.repo-validate-btn {
+  height: 38px;
+  flex-shrink: 0;
+}
+
+.repo-examples-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.repo-examples-label {
+  font-size: 0.75rem;
+  color: var(--text-muted);
+  font-weight: 500;
+}
+
+.repo-examples-list {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.repo-example-chip {
+  height: 26px;
+  padding: 0 10px;
+  border-radius: var(--radius-full);
+  border: 1px solid var(--border-default);
+  background: var(--surface-subtle);
+  color: var(--text-secondary);
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  cursor: pointer;
+  transition: border-color var(--transition-fast), color var(--transition-fast);
+}
+
+.repo-example-chip:hover:not(:disabled) {
+  border-color: var(--border-hover);
+  color: var(--text-primary);
+}
+
+@media (max-width: 600px) {
+  .repo-search-card {
+    padding: 16px;
+  }
+
+  .repo-search-row {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .repo-validate-btn {
+    width: 100%;
+  }
+}

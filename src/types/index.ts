@@ -6,3 +6,5 @@
 export * from './health';
 export * from './interview';
 export * from './session';
+export * from './document';
+export * from './github';

@@ -1,124 +1,143 @@
-import { useEffect, useState, useCallback, useMemo } from 'react';
+import { useEffect, useState, useMemo } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { listSessions, getSession } from '../../api/sessionService';
+import { formatApiError, isRequestAborted } from '../../utils/error';
+import {
+  formatDateTime,
+  formatRelativeDate,
+  getDifficultyBadgeClass,
+  getRatingBadgeClass,
+  getRatingFromScore,
+} from '../../utils/format';
 import type { SessionDetailResponse, SessionQuestionItem } from '../../types';
+import { SkeletonListRows, SkeletonStatsRow } from '../../components/ui/Skeleton';
 import LoadingSpinner from '../../components/ui/LoadingSpinner';
 import ErrorDisplay from '../../components/ui/ErrorDisplay';
 import EmptyState from '../../components/ui/EmptyState';
+import {
+  SearchIcon,
+  XIcon,
+  RefreshIcon,
+  HistoryIcon,
+  CopyIcon,
+  CheckIcon,
+  ArrowRightIcon,
+  AwardIcon,
+} from '../../components/ui/Icons';
 import './InterviewHistory.css';
 
-function ratingColor(rating: string): string {
-  switch (rating) {
-    case 'Excellent':
-      return 'var(--color-success)';
-    case 'Good':
-      return 'var(--color-info)';
-    case 'Fair':
-      return 'var(--color-warning)';
-    default:
-      return 'var(--color-error)';
-  }
-}
-
-function formatDate(iso: string): string {
-  try {
-    const date = new Date(iso);
-    return date.toLocaleDateString('en-US', {
-      month: 'short',
-      day: 'numeric',
-      year: 'numeric',
-      hour: '2-digit',
-      minute: '2-digit',
-    });
-  } catch {
-    return iso;
-  }
+function getSessionAverageScore(sessionItem: SessionDetailResponse): number | null {
+  const evaluated = sessionItem.questions.filter((q) => q.evaluation !== null);
+  if (evaluated.length === 0) return null;
+  const sum = evaluated.reduce((acc, q) => acc + (q.evaluation?.overall_score ?? 0), 0);
+  return Math.round(sum / evaluated.length);
 }
 
 export default function InterviewHistory() {
   const navigate = useNavigate();
   const { sessionId: routeSessionId } = useParams<{ sessionId?: string }>();
 
-  // List view state
   const [sessions, setSessions] = useState<SessionDetailResponse[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  const [reloadTick, setReloadTick] = useState(0);
+
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState<'all' | 'in_progress' | 'completed'>('all');
 
-  // Selected session for detailed breakdown view
-  const [selectedSessionId, setSelectedSessionId] = useState<string | null>(routeSessionId || null);
+  const [localSelectedId, setLocalSelectedId] = useState<string | null>(null);
+  const selectedSessionId = routeSessionId ?? localSelectedId;
+
   const [detailSession, setDetailSession] = useState<SessionDetailResponse | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
   const [detailError, setDetailError] = useState('');
+  const [detailReloadTick, setDetailReloadTick] = useState(0);
   const [copiedAnswerIdx, setCopiedAnswerIdx] = useState<number | null>(null);
 
-  // Sync route param with selected session
+  // Load session list
   useEffect(() => {
-    if (routeSessionId) {
-      setSelectedSessionId(routeSessionId);
+    let active = true;
+    const controller = new AbortController();
+
+    async function fetchHistory() {
+      try {
+        const data = await listSessions(50, 0, { signal: controller.signal });
+        if (!active) return;
+        setSessions(data);
+        setError('');
+        setLoading(false);
+      } catch (err) {
+        if (!active || isRequestAborted(err)) return;
+        setError(formatApiError(err, 'Failed to load interview history.'));
+        setLoading(false);
+      }
     }
-  }, [routeSessionId]);
 
-  // Load all sessions
-  const loadHistory = useCallback(async () => {
-    setLoading(true);
-    setError('');
+    void fetchHistory();
 
-    try {
-      const data = await listSessions(15, 0);
-      setSessions(data);
-    } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : 'Failed to retrieve interview session history.';
-      setError(msg);
-    } finally {
-      setLoading(false);
-    }
-  }, []);
+    return () => {
+      active = false;
+      controller.abort();
+    };
+  }, [reloadTick]);
 
+  // Load selected session detail
   useEffect(() => {
-    loadHistory();
-  }, [loadHistory]);
+    if (!selectedSessionId) return;
 
-  // Load detailed session data when a session is selected
-  const loadSessionDetail = useCallback(async (id: string) => {
-    setDetailLoading(true);
-    setDetailError('');
+    let active = true;
+    const controller = new AbortController();
 
-    try {
-      const data = await getSession(id);
-      setDetailSession(data);
-    } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : 'Failed to load session details.';
-      setDetailError(msg);
-    } finally {
-      setDetailLoading(false);
+    async function fetchDetail() {
+      try {
+        const data = await getSession(selectedSessionId!, { signal: controller.signal });
+        if (!active) return;
+        setDetailSession(data);
+        setDetailError('');
+        setDetailLoading(false);
+      } catch (err) {
+        if (!active || isRequestAborted(err)) return;
+        setDetailError(formatApiError(err, 'Failed to load session details.'));
+        setDetailLoading(false);
+      }
     }
-  }, []);
 
+    void fetchDetail();
+
+    return () => {
+      active = false;
+      controller.abort();
+    };
+  }, [selectedSessionId, detailReloadTick]);
+
+  // Close modal on Escape
   useEffect(() => {
-    if (selectedSessionId) {
-      loadSessionDetail(selectedSessionId);
-    } else {
-      setDetailSession(null);
+    if (!selectedSessionId) return;
+    function onKeyDown(e: KeyboardEvent) {
+      if (e.key === 'Escape') {
+        setLocalSelectedId(null);
+        setDetailSession(null);
+        if (routeSessionId) {
+          navigate('/history');
+        }
+      }
     }
-  }, [selectedSessionId, loadSessionDetail]);
+    document.addEventListener('keydown', onKeyDown);
+    return () => document.removeEventListener('keydown', onKeyDown);
+  }, [selectedSessionId, routeSessionId, navigate]);
 
-  // Filtered sessions
   const filteredSessions = useMemo(() => {
+    const query = searchTerm.trim().toLowerCase();
     return sessions.filter((s) => {
       const matchesSearch =
-        s.role.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        s.topic.toLowerCase().includes(searchTerm.toLowerCase());
-
-      const matchesStatus =
-        statusFilter === 'all' || s.status === statusFilter;
-
+        !query ||
+        s.role.toLowerCase().includes(query) ||
+        s.topic.toLowerCase().includes(query);
+      const matchesStatus = statusFilter === 'all' || s.status === statusFilter;
       return matchesSearch && matchesStatus;
     });
   }, [sessions, searchTerm, statusFilter]);
 
-  // Global metrics summary
   const metrics = useMemo(() => {
     const total = sessions.length;
     const completed = sessions.filter((s) => s.status === 'completed').length;
@@ -126,7 +145,6 @@ export default function InterviewHistory() {
 
     let evaluatedCount = 0;
     let scoreSum = 0;
-
     sessions.forEach((s) => {
       s.questions.forEach((q) => {
         if (q.evaluation) {
@@ -136,29 +154,36 @@ export default function InterviewHistory() {
       });
     });
 
-    const averageScore = evaluatedCount > 0 ? Math.round(scoreSum / evaluatedCount) : 0;
-
-    return { total, completed, inProgress, evaluatedCount, averageScore };
+    const averageScore = evaluatedCount > 0 ? Math.round(scoreSum / evaluatedCount) : null;
+    return { total, completed, inProgress, averageScore };
   }, [sessions]);
 
-  // Calculate average score for a single session
-  function getSessionAverageScore(sessionItem: SessionDetailResponse): number | null {
-    const evaluated = sessionItem.questions.filter((q) => q.evaluation !== null);
-    if (evaluated.length === 0) return null;
-    const sum = evaluated.reduce((acc, q) => acc + (q.evaluation?.overall_score ?? 0), 0);
-    return Math.round(sum / evaluated.length);
+  function handleRefresh() {
+    setLoading(true);
+    setError('');
+    setReloadTick((t) => t + 1);
   }
 
   function handleOpenDetail(id: string) {
-    setSelectedSessionId(id);
+    setDetailLoading(true);
+    setDetailError('');
+    setDetailSession(null);
+    setLocalSelectedId(id);
   }
 
   function handleCloseDetail() {
-    setSelectedSessionId(null);
+    setLocalSelectedId(null);
     setDetailSession(null);
+    setDetailError('');
     if (routeSessionId) {
       navigate('/history');
     }
+  }
+
+  function handleRetryDetail() {
+    setDetailLoading(true);
+    setDetailError('');
+    setDetailReloadTick((t) => t + 1);
   }
 
   function handleCopySample(text: string, idx: number) {
@@ -168,514 +193,527 @@ export default function InterviewHistory() {
   }
 
   if (loading) {
-    return <LoadingSpinner message="Loading interview session history…" />;
+    return (
+      <div className="page-container">
+        <SkeletonStatsRow count={4} />
+        <SkeletonListRows count={4} />
+      </div>
+    );
   }
 
   if (error) {
-    return <ErrorDisplay message={error} onRetry={loadHistory} />;
+    return (
+      <div className="page-container">
+        <ErrorDisplay
+          title="Could not load interview history"
+          message={error}
+          onRetry={handleRefresh}
+        />
+      </div>
+    );
   }
 
   return (
-    <div className="history-page animate-fade-in" id="history-page">
-      {/* Page Header */}
-      <div className="history-header">
-        <h2 className="history-title">
-          Interview <span className="gradient-text">History & Archives</span>
-        </h2>
-        <p className="history-subtitle">
-          Track all your interview sessions, inspect AI evaluation scores, review answers, and resume in-progress interviews.
-        </p>
-      </div>
-
-      {/* Metrics Banner */}
-      <div className="history-metrics-grid">
-        <div className="metric-card glass-card">
-          <span className="metric-icon">📋</span>
-          <div className="metric-content">
-            <span className="metric-value" id="metric-total-sessions">{metrics.total}</span>
-            <span className="metric-label">Total Sessions</span>
-          </div>
-        </div>
-
-        <div className="metric-card glass-card">
-          <span className="metric-icon">✅</span>
-          <div className="metric-content">
-            <span className="metric-value" id="metric-completed-sessions">{metrics.completed}</span>
-            <span className="metric-label">Completed Sessions</span>
-          </div>
-        </div>
-
-        <div className="metric-card glass-card">
-          <span className="metric-icon">⏳</span>
-          <div className="metric-content">
-            <span className="metric-value" id="metric-inprogress-sessions">{metrics.inProgress}</span>
-            <span className="metric-label">In Progress</span>
-          </div>
-        </div>
-
-        <div className="metric-card glass-card">
-          <span className="metric-icon">⭐</span>
-          <div className="metric-content">
-            <span className="metric-value" id="metric-average-score">
-              {metrics.averageScore > 0 ? `${metrics.averageScore}` : '—'}
-            </span>
-            <span className="metric-label">Avg. Evaluated Score</span>
-          </div>
-        </div>
-      </div>
-
-      {/* Controls & Filter Bar */}
-      <div className="history-controls-bar glass-card">
-        <div className="search-box">
-          <span className="search-icon">🔍</span>
-          <input
-            type="text"
-            className="search-input"
-            placeholder="Search by role or topic…"
-            value={searchTerm}
-            onChange={(e) => setSearchTerm(e.target.value)}
-            id="history-search-input"
-          />
-          {searchTerm && (
-            <button
-              type="button"
-              className="clear-search-btn"
-              onClick={() => setSearchTerm('')}
-            >
-              ✕
-            </button>
-          )}
-        </div>
-
-        <div className="filter-tabs">
-          <button
-            type="button"
-            className={`filter-tab ${statusFilter === 'all' ? 'filter-tab-active' : ''}`}
-            onClick={() => setStatusFilter('all')}
-            id="filter-all-btn"
-          >
-            All ({metrics.total})
-          </button>
-          <button
-            type="button"
-            className={`filter-tab ${statusFilter === 'completed' ? 'filter-tab-active' : ''}`}
-            onClick={() => setStatusFilter('completed')}
-            id="filter-completed-btn"
-          >
-            Completed ({metrics.completed})
-          </button>
-          <button
-            type="button"
-            className={`filter-tab ${statusFilter === 'in_progress' ? 'filter-tab-active' : ''}`}
-            onClick={() => setStatusFilter('in_progress')}
-            id="filter-inprogress-btn"
-          >
-            In Progress ({metrics.inProgress})
-          </button>
+    <div className="page-container animate-fade-in" id="history-page">
+      <div className="page-header">
+        <div className="page-header-text">
+          <h2 className="page-title">Interview History</h2>
+          <p className="page-subtitle">
+            Review completed interviews, inspect question-level feedback, and resume sessions in progress.
+          </p>
         </div>
 
         <button
           type="button"
-          className="btn btn-secondary btn-sm refresh-btn"
-          onClick={loadHistory}
+          className="btn btn-secondary btn-sm"
+          onClick={handleRefresh}
           id="refresh-history-btn"
-          title="Refresh Sessions"
         >
-          🔄 Refresh
+          <RefreshIcon size={13} />
+          <span>Refresh</span>
         </button>
       </div>
 
-      {/* Sessions Content */}
-      {filteredSessions.length === 0 ? (
-        <EmptyState
-          icon={searchTerm ? '🔍' : '📋'}
-          title={searchTerm ? 'No matching sessions found' : 'No Interview History Yet'}
-          description={
-            searchTerm
-              ? `No sessions matched "${searchTerm}". Try adjusting your search query.`
-              : 'Your past interview practice sessions and questions will appear here.'
-          }
-          action={{
-            label: 'Start New Interview',
-            onClick: () => navigate('/start'),
-          }}
-        />
-      ) : (
-        <div className="history-table-wrapper glass-card">
-          <table className="history-table" id="history-table">
-            <thead>
-              <tr>
-                <th>Job Role</th>
-                <th>Topic & Domain</th>
-                <th>Difficulty</th>
-                <th>Experience</th>
-                <th>Questions</th>
-                <th>Status</th>
-                <th>Avg. Score</th>
-                <th>Created</th>
-                <th>Actions</th>
-              </tr>
-            </thead>
-            <tbody>
-              {filteredSessions.map((sessionItem) => {
-                const avgScore = getSessionAverageScore(sessionItem);
-                const isSelected = selectedSessionId === sessionItem.session_id;
-
-                return (
-                  <tr
-                    key={sessionItem.session_id}
-                    className={`history-row ${isSelected ? 'row-selected' : ''}`}
-                    onClick={() => handleOpenDetail(sessionItem.session_id)}
-                    id={`session-row-${sessionItem.session_id}`}
-                  >
-                    <td className="cell-role">
-                      <strong>{sessionItem.role}</strong>
-                    </td>
-                    <td>
-                      <span className="topic-text">📌 {sessionItem.topic}</span>
-                    </td>
-                    <td>
-                      <span className={`badge badge-diff badge-diff-${sessionItem.difficulty.toLowerCase()}`}>
-                        {sessionItem.difficulty}
-                      </span>
-                    </td>
-                    <td>
-                      <span className="level-text">{sessionItem.experience_level}</span>
-                    </td>
-                    <td>
-                      <div className="cell-progress">
-                        <div className="mini-bar">
-                          <div
-                            className="mini-fill"
-                            style={{
-                              width: `${sessionItem.total_questions > 0 ? (sessionItem.completed_questions / sessionItem.total_questions) * 100 : 0}%`,
-                            }}
-                          ></div>
-                        </div>
-                        <span className="progress-count">
-                          {sessionItem.completed_questions}/{sessionItem.total_questions}
-                        </span>
-                      </div>
-                    </td>
-                    <td>
-                      <span className={`badge ${sessionItem.status === 'completed' ? 'badge-success' : 'badge-warning'}`}>
-                        {sessionItem.status === 'completed' ? 'Completed' : 'In Progress'}
-                      </span>
-                    </td>
-                    <td>
-                      {avgScore !== null ? (
-                        <span
-                          className="score-pill"
-                          style={{
-                            borderColor: ratingColor(
-                              avgScore >= 80 ? 'Excellent' : avgScore >= 60 ? 'Good' : avgScore >= 40 ? 'Fair' : 'Needs Improvement'
-                            ),
-                            color: ratingColor(
-                              avgScore >= 80 ? 'Excellent' : avgScore >= 60 ? 'Good' : avgScore >= 40 ? 'Fair' : 'Needs Improvement'
-                            ),
-                          }}
-                        >
-                          {avgScore}
-                        </span>
-                      ) : (
-                        <span className="score-pending">—</span>
-                      )}
-                    </td>
-                    <td className="cell-date">{formatDate(sessionItem.created_at)}</td>
-                    <td className="cell-actions" onClick={(e) => e.stopPropagation()}>
-                      <button
-                        type="button"
-                        className="btn btn-secondary btn-sm"
-                        onClick={() => handleOpenDetail(sessionItem.session_id)}
-                        id={`inspect-session-${sessionItem.session_id}`}
-                      >
-                        Inspect Details
-                      </button>
-
-                      {sessionItem.status === 'in_progress' && (
-                        <button
-                          type="button"
-                          className="btn btn-primary btn-sm"
-                          onClick={() => navigate(`/practice/${sessionItem.session_id}`)}
-                          id={`resume-session-${sessionItem.session_id}`}
-                        >
-                          Continue →
-                        </button>
-                      )}
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
+      {/* Metrics Row (only shown when real sessions exist) */}
+      {sessions.length > 0 && (
+        <div className="history-stats-grid">
+          <div className="surface-card history-stat-card">
+            <span className="history-stat-label">Total Sessions</span>
+            <span className="history-stat-val" id="metric-total-sessions">
+              {metrics.total}
+            </span>
+          </div>
+          <div className="surface-card history-stat-card">
+            <span className="history-stat-label">Completed</span>
+            <span className="history-stat-val" id="metric-completed-sessions">
+              {metrics.completed}
+            </span>
+          </div>
+          <div className="surface-card history-stat-card">
+            <span className="history-stat-label">In Progress</span>
+            <span className="history-stat-val" id="metric-inprogress-sessions">
+              {metrics.inProgress}
+            </span>
+          </div>
+          <div className="surface-card history-stat-card">
+            <span className="history-stat-label">Average Score</span>
+            <span className="history-stat-val" id="metric-average-score">
+              {metrics.averageScore !== null ? `${metrics.averageScore}/100` : '—'}
+            </span>
+          </div>
         </div>
       )}
 
-      {/* Session Details Modal / Slide-Over */}
+      {/* Search & Filter Controls */}
+      {sessions.length > 0 && (
+        <div className="surface-card history-controls">
+          <div className="history-search-wrap">
+            <SearchIcon size={15} className="history-search-icon" />
+            <input
+              type="text"
+              className="form-input history-search-input"
+              placeholder="Search by role or topic…"
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+              id="history-search-input"
+            />
+            {searchTerm && (
+              <button
+                type="button"
+                className="history-clear-search"
+                onClick={() => setSearchTerm('')}
+                aria-label="Clear search"
+              >
+                <XIcon size={14} />
+              </button>
+            )}
+          </div>
+
+          <div className="history-filter-tabs" role="tablist" aria-label="Filter sessions">
+            <button
+              type="button"
+              role="tab"
+              aria-selected={statusFilter === 'all'}
+              className={`history-filter-btn ${statusFilter === 'all' ? 'is-active' : ''}`}
+              onClick={() => setStatusFilter('all')}
+              id="filter-all-btn"
+            >
+              All ({metrics.total})
+            </button>
+            <button
+              type="button"
+              role="tab"
+              aria-selected={statusFilter === 'completed'}
+              className={`history-filter-btn ${statusFilter === 'completed' ? 'is-active' : ''}`}
+              onClick={() => setStatusFilter('completed')}
+              id="filter-completed-btn"
+            >
+              Completed ({metrics.completed})
+            </button>
+            <button
+              type="button"
+              role="tab"
+              aria-selected={statusFilter === 'in_progress'}
+              className={`history-filter-btn ${statusFilter === 'in_progress' ? 'is-active' : ''}`}
+              onClick={() => setStatusFilter('in_progress')}
+              id="filter-inprogress-btn"
+            >
+              In Progress ({metrics.inProgress})
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Sessions List / Empty State */}
+      {filteredSessions.length === 0 ? (
+        <EmptyState
+          icon={searchTerm ? <SearchIcon size={20} /> : <HistoryIcon size={20} />}
+          title={searchTerm ? 'No matching sessions' : 'No interview history yet'}
+          description={
+            searchTerm
+              ? `No sessions matched "${searchTerm}". Try clearing the search filter.`
+              : 'Your completed and in-progress interview sessions will appear here.'
+          }
+          action={
+            searchTerm
+              ? { label: 'Clear Search', onClick: () => setSearchTerm('') }
+              : { label: 'Start RAG Interview', onClick: () => navigate('/rag') }
+          }
+          secondaryAction={
+            !searchTerm
+              ? { label: 'Configure AI Interview', onClick: () => navigate('/start') }
+              : undefined
+          }
+        />
+      ) : (
+        <>
+          {/* Desktop Table */}
+          <div className="surface-card history-table-container">
+            <table className="history-table" id="history-table">
+              <thead>
+                <tr>
+                  <th>Role & Topic</th>
+                  <th>Difficulty</th>
+                  <th>Progress</th>
+                  <th>Status</th>
+                  <th>Avg. Score</th>
+                  <th>Date</th>
+                  <th className="th-actions">Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {filteredSessions.map((item) => {
+                  const avg = getSessionAverageScore(item);
+                  const pct =
+                    item.total_questions > 0
+                      ? Math.round((item.completed_questions / item.total_questions) * 100)
+                      : 0;
+
+                  return (
+                    <tr
+                      key={item.session_id}
+                      className={`history-tr ${
+                        selectedSessionId === item.session_id ? 'is-selected' : ''
+                      }`}
+                      onClick={() => handleOpenDetail(item.session_id)}
+                      id={`session-row-${item.session_id}`}
+                    >
+                      <td>
+                        <div className="td-title-stack">
+                          <span className="td-role">{item.role}</span>
+                          <span className="td-topic">{item.topic}</span>
+                        </div>
+                      </td>
+                      <td>
+                        <span className={`badge ${getDifficultyBadgeClass(item.difficulty)}`}>
+                          {item.difficulty}
+                        </span>
+                      </td>
+                      <td>
+                        <div className="td-progress">
+                          <div className="td-progress-track">
+                            <div className="td-progress-fill" style={{ width: `${pct}%` }} />
+                          </div>
+                          <span className="td-progress-text">
+                            {item.completed_questions}/{item.total_questions}
+                          </span>
+                        </div>
+                      </td>
+                      <td>
+                        <span
+                          className={`badge ${
+                            item.status === 'completed' ? 'badge-success' : 'badge-warning'
+                          }`}
+                        >
+                          {item.status === 'completed' ? 'Completed' : 'In Progress'}
+                        </span>
+                      </td>
+                      <td>
+                        {avg !== null ? (
+                          <span className={`badge ${getRatingBadgeClass(getRatingFromScore(avg))}`}>
+                            {avg}/100
+                          </span>
+                        ) : (
+                          <span className="td-muted">—</span>
+                        )}
+                      </td>
+                      <td className="td-date">{formatRelativeDate(item.created_at)}</td>
+                      <td className="td-actions" onClick={(e) => e.stopPropagation()}>
+                        <button
+                          type="button"
+                          className="btn btn-secondary btn-sm"
+                          onClick={() => handleOpenDetail(item.session_id)}
+                          id={`inspect-session-${item.session_id}`}
+                        >
+                          Details
+                        </button>
+                        {item.status === 'in_progress' ? (
+                          <button
+                            type="button"
+                            className="btn btn-primary btn-sm"
+                            onClick={() => navigate(`/practice/${item.session_id}`)}
+                            id={`resume-session-${item.session_id}`}
+                          >
+                            Continue
+                          </button>
+                        ) : (
+                          <button
+                            type="button"
+                            className="btn btn-ghost btn-sm"
+                            onClick={() => navigate(`/results/${item.session_id}`)}
+                          >
+                            Summary
+                          </button>
+                        )}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+
+          {/* Mobile Card List (<= 860px) */}
+          <div className="history-mobile-list">
+            {filteredSessions.map((item) => {
+              const avg = getSessionAverageScore(item);
+              return (
+                <div key={item.session_id} className="surface-card history-mobile-card">
+                  <div className="mobile-card-top">
+                    <div className="mobile-card-title-group">
+                      <span className="td-role">{item.role}</span>
+                      <span className="td-topic">{item.topic}</span>
+                    </div>
+                    <span
+                      className={`badge ${
+                        item.status === 'completed' ? 'badge-success' : 'badge-warning'
+                      }`}
+                    >
+                      {item.status === 'completed' ? 'Completed' : 'In Progress'}
+                    </span>
+                  </div>
+
+                  <div className="mobile-card-meta">
+                    <span className={`badge ${getDifficultyBadgeClass(item.difficulty)}`}>
+                      {item.difficulty}
+                    </span>
+                    <span className="badge badge-neutral">
+                      {item.completed_questions}/{item.total_questions} answered
+                    </span>
+                    {avg !== null && (
+                      <span className={`badge ${getRatingBadgeClass(getRatingFromScore(avg))}`}>
+                        {avg}/100
+                      </span>
+                    )}
+                    <span className="td-date">{formatRelativeDate(item.created_at)}</span>
+                  </div>
+
+                  <div className="mobile-card-actions">
+                    <button
+                      type="button"
+                      className="btn btn-secondary btn-sm"
+                      onClick={() => handleOpenDetail(item.session_id)}
+                    >
+                      Details
+                    </button>
+                    {item.status === 'in_progress' ? (
+                      <button
+                        type="button"
+                        className="btn btn-primary btn-sm"
+                        onClick={() => navigate(`/practice/${item.session_id}`)}
+                      >
+                        <span>Continue</span>
+                        <ArrowRightIcon size={13} />
+                      </button>
+                    ) : (
+                      <button
+                        type="button"
+                        className="btn btn-primary btn-sm"
+                        onClick={() => navigate(`/results/${item.session_id}`)}
+                      >
+                        <AwardIcon size={13} />
+                        <span>Summary</span>
+                      </button>
+                    )}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </>
+      )}
+
+      {/* Session Details Modal */}
       {selectedSessionId && (
-        <div className="detail-modal-backdrop animate-fade-in" onClick={handleCloseDetail} id="session-detail-modal">
-          <div className="detail-modal-card glass-card" onClick={(e) => e.stopPropagation()}>
+        <div
+          className="history-modal-backdrop animate-fade-in"
+          onClick={handleCloseDetail}
+          id="session-detail-modal"
+          role="dialog"
+          aria-modal="true"
+          aria-label="Interview session details"
+        >
+          <div className="surface-card history-modal-card" onClick={(e) => e.stopPropagation()}>
             {detailLoading ? (
-              <div className="detail-loading-box">
-                <LoadingSpinner message="Loading full session details, answers, and evaluations…" size="lg" />
+              <div className="modal-loading-box">
+                <LoadingSpinner message="Loading session details…" size="md" />
               </div>
             ) : detailError ? (
-              <div className="detail-error-box">
-                <ErrorDisplay message={detailError} onRetry={() => loadSessionDetail(selectedSessionId)} />
-                <button type="button" className="btn btn-secondary" onClick={handleCloseDetail}>
+              <div className="modal-error-box">
+                <ErrorDisplay message={detailError} onRetry={handleRetryDetail} />
+                <button type="button" className="btn btn-secondary btn-sm" onClick={handleCloseDetail}>
                   Close
                 </button>
               </div>
             ) : detailSession ? (
-              <div className="detail-content animate-fade-in">
-                {/* Modal Header */}
-                <div className="detail-header">
-                  <div className="detail-title-col">
-                    <div className="detail-meta-top">
-                      <span className="session-id-pill" title="Session UUID">
-                        ID: {detailSession.session_id.slice(0, 8)}…
+              <>
+                <div className="modal-header-bar">
+                  <div className="modal-header-info">
+                    <div className="modal-badges-top">
+                      <span className="modal-id-pill">
+                        ID: {detailSession.session_id.slice(0, 8)}
                       </span>
-                      <span className={`badge ${detailSession.status === 'completed' ? 'badge-success' : 'badge-warning'}`}>
-                        {detailSession.status === 'completed' ? 'Completed Session' : 'In Progress'}
+                      <span
+                        className={`badge ${
+                          detailSession.status === 'completed' ? 'badge-success' : 'badge-warning'
+                        }`}
+                      >
+                        {detailSession.status === 'completed' ? 'Completed' : 'In Progress'}
                       </span>
-                      <span className="detail-timestamp">
-                        Created {formatDate(detailSession.created_at)}
+                      <span className="modal-date-text">
+                        {formatDateTime(detailSession.created_at)}
                       </span>
                     </div>
-                    <h3 className="detail-role-title">
-                      {detailSession.role} <span className="detail-topic-highlight">({detailSession.topic})</span>
+                    <h3 className="modal-title">
+                      {detailSession.role} — {detailSession.topic}
                     </h3>
-                    <div className="detail-badges-row">
-                      <span className={`badge badge-diff badge-diff-${detailSession.difficulty.toLowerCase()}`}>
+                    <div className="modal-sub-badges">
+                      <span className={`badge ${getDifficultyBadgeClass(detailSession.difficulty)}`}>
                         {detailSession.difficulty}
                       </span>
                       <span className="badge badge-info">{detailSession.question_type}</span>
                       <span className="badge badge-neutral">{detailSession.experience_level}</span>
-                      <span className="badge badge-primary">
-                        {detailSession.completed_questions} of {detailSession.total_questions} Questions Answered
+                      <span className="badge badge-neutral">
+                        {detailSession.completed_questions}/{detailSession.total_questions} answered
                       </span>
                     </div>
                   </div>
 
                   <button
                     type="button"
-                    className="modal-close-btn"
+                    className="btn btn-ghost btn-icon"
                     onClick={handleCloseDetail}
                     aria-label="Close session details"
                     id="close-detail-modal-btn"
                   >
-                    ✕
+                    <XIcon size={17} />
                   </button>
                 </div>
 
-                {/* Performance Summary Banner */}
-                {detailSession.questions.some((q) => q.evaluation !== null) && (
-                  <div className="detail-performance-card glass-card">
-                    {(() => {
-                      const avg = getSessionAverageScore(detailSession) ?? 0;
-                      const rating = avg >= 80 ? 'Excellent' : avg >= 60 ? 'Good' : avg >= 40 ? 'Fair' : 'Needs Improvement';
-                      return (
-                        <>
-                          <div className="perf-score-ring" style={{ borderColor: ratingColor(rating) }}>
-                            <span className="perf-score-val">{avg}</span>
-                            <span className="perf-score-sub">Avg</span>
-                          </div>
-                          <div className="perf-text-col">
-                            <div className="perf-rating-row">
-                              <span className="perf-label">Session Performance:</span>
-                              <span
-                                className="perf-rating-pill"
-                                style={{ color: ratingColor(rating), borderColor: ratingColor(rating) }}
-                              >
-                                {rating}
+                <div className="modal-scroll-body">
+                  {detailSession.questions.length === 0 ? (
+                    <EmptyState
+                      icon={<HistoryIcon size={18} />}
+                      title="No questions generated yet"
+                      description="Open this session in the practice room to generate the first question."
+                    />
+                  ) : (
+                    <div className="modal-questions-list">
+                      {detailSession.questions.map((q: SessionQuestionItem, idx: number) => (
+                        <div
+                          key={q.question_number}
+                          className="modal-q-item"
+                          id={`detail-q-${q.question_number}`}
+                        >
+                          <div className="modal-q-top">
+                            <div className="modal-q-badges">
+                              <span className="badge badge-neutral">Q{q.question_number}</span>
+                              <span className={`badge ${getDifficultyBadgeClass(q.difficulty)}`}>
+                                {q.difficulty}
                               </span>
                             </div>
-                            <p className="perf-desc">
-                              Cumulative score across all evaluated technical responses in this practice session.
+                            {q.evaluation ? (
+                              <span className={`badge ${getRatingBadgeClass(q.evaluation.rating)}`}>
+                                {q.evaluation.overall_score}/100 · {q.evaluation.rating}
+                              </span>
+                            ) : (
+                              <span className="badge badge-neutral">Pending</span>
+                            )}
+                          </div>
+
+                          <p className="modal-q-prompt">{q.question}</p>
+
+                          <div className="modal-q-answer">
+                            <span className="modal-sub-label">Candidate Answer</span>
+                            <p>
+                              {q.candidate_answer || <em>No answer submitted yet.</em>}
                             </p>
                           </div>
-                        </>
-                      );
-                    })()}
-                  </div>
-                )}
 
-                {/* Questions Breakdown List */}
-                <div className="detail-questions-section">
-                  <h4 className="detail-section-heading">
-                    <span>Questions, Responses & AI Rubric Evaluations</span>
-                    <span className="questions-count-tag">
-                      {detailSession.questions.length} Question{detailSession.questions.length === 1 ? '' : 's'} Generated
-                    </span>
-                  </h4>
-
-                  {detailSession.questions.length === 0 ? (
-                    <div className="detail-empty-questions glass-card">
-                      <p>No questions have been generated in this session yet.</p>
-                      <button
-                        type="button"
-                        className="btn btn-primary btn-sm"
-                        onClick={() => navigate(`/practice/${detailSession.session_id}`)}
-                      >
-                        Generate First Question
-                      </button>
-                    </div>
-                  ) : (
-                    <div className="detail-questions-list">
-                      {detailSession.questions.map((q: SessionQuestionItem, idx: number) => {
-                        return (
-                          <div key={q.question_number} className="detail-q-card glass-card" id={`detail-q-${q.question_number}`}>
-                            {/* Question Header */}
-                            <div className="detail-q-header">
-                              <div className="detail-q-number-box">
-                                <span className="detail-q-num">Q{q.question_number}</span>
-                              </div>
-                              <div className="detail-q-header-content">
-                                <div className="detail-q-badges">
-                                  <span className={`badge badge-diff badge-diff-${q.difficulty.toLowerCase()}`}>
-                                    {q.difficulty}
-                                  </span>
-                                  <span className="badge badge-neutral">📌 {q.topic}</span>
-                                  {q.evaluation ? (
-                                    <span
-                                      className="score-badge-inline"
-                                      style={{
-                                        borderColor: ratingColor(q.evaluation.rating),
-                                        color: ratingColor(q.evaluation.rating),
-                                      }}
-                                    >
-                                      Score: {q.evaluation.overall_score}/100 ({q.evaluation.rating})
-                                    </span>
-                                  ) : q.candidate_answer ? (
-                                    <span className="badge badge-warning">Answered · Pending Evaluation</span>
-                                  ) : (
-                                    <span className="badge badge-neutral">Awaiting Candidate Response</span>
-                                  )}
+                          {q.evaluation && (
+                            <div className="modal-q-eval">
+                              {q.evaluation.strengths?.length > 0 && (
+                                <div className="modal-eval-col">
+                                  <span className="modal-sub-label text-success">Strengths</span>
+                                  <ul>
+                                    {q.evaluation.strengths.map((s, sIdx) => (
+                                      <li key={sIdx}>{s}</li>
+                                    ))}
+                                  </ul>
                                 </div>
-                                <h5 className="detail-q-title">{q.question}</h5>
-                              </div>
-                            </div>
-
-                            {/* Follow up probe */}
-                            {q.follow_up_question && (
-                              <div className="detail-q-followup">
-                                <span className="followup-tag">💡 Follow-up Probe:</span>
-                                <span className="followup-content">{q.follow_up_question}</span>
-                              </div>
-                            )}
-
-                            {/* Candidate Submitted Answer */}
-                            <div className="detail-answer-box">
-                              <span className="detail-sub-label">📝 Candidate Response:</span>
-                              {q.candidate_answer ? (
-                                <p className="detail-answer-text">{q.candidate_answer}</p>
-                              ) : (
-                                <p className="detail-unanswered-text">
-                                  <em>No answer submitted yet for this question.</em>
-                                </p>
+                              )}
+                              {q.evaluation.improvements?.length > 0 && (
+                                <div className="modal-eval-col">
+                                  <span className="modal-sub-label text-warning">Improvements</span>
+                                  <ul>
+                                    {q.evaluation.improvements.map((im, iIdx) => (
+                                      <li key={iIdx}>{im}</li>
+                                    ))}
+                                  </ul>
+                                </div>
+                              )}
+                              {q.evaluation.sample_answer && (
+                                <div className="modal-sample-box">
+                                  <div className="modal-sample-header">
+                                    <span className="modal-sub-label">Model Answer</span>
+                                    <button
+                                      type="button"
+                                      className="btn btn-ghost btn-sm"
+                                      onClick={() =>
+                                        handleCopySample(q.evaluation!.sample_answer, idx)
+                                      }
+                                    >
+                                      {copiedAnswerIdx === idx ? (
+                                        <CheckIcon size={12} />
+                                      ) : (
+                                        <CopyIcon size={12} />
+                                      )}
+                                      <span>{copiedAnswerIdx === idx ? 'Copied' : 'Copy'}</span>
+                                    </button>
+                                  </div>
+                                  <p>{q.evaluation.sample_answer}</p>
+                                </div>
                               )}
                             </div>
-
-                            {/* Evaluation Breakdown if present */}
-                            {q.evaluation && (
-                              <div className="detail-eval-breakdown">
-                                <div className="eval-breakdown-grid">
-                                  {/* Correct Points */}
-                                  {q.evaluation.correct_points && q.evaluation.correct_points.length > 0 && (
-                                    <div className="eval-breakdown-card eval-correct-box">
-                                      <h6>✅ Correct Technical Points</h6>
-                                      <ul>
-                                        {q.evaluation.correct_points.map((pt, pIdx) => (
-                                          <li key={pIdx}>{pt}</li>
-                                        ))}
-                                      </ul>
-                                    </div>
-                                  )}
-
-                                  {/* Missing Points */}
-                                  {q.evaluation.missing_points && q.evaluation.missing_points.length > 0 && (
-                                    <div className="eval-breakdown-card eval-missing-box">
-                                      <h6>⚠️ Missing Criteria</h6>
-                                      <ul>
-                                        {q.evaluation.missing_points.map((pt, pIdx) => (
-                                          <li key={pIdx}>{pt}</li>
-                                        ))}
-                                      </ul>
-                                    </div>
-                                  )}
-
-                                  {/* Strengths */}
-                                  {q.evaluation.strengths && q.evaluation.strengths.length > 0 && (
-                                    <div className="eval-breakdown-card eval-strengths-box">
-                                      <h6>💪 Notable Strengths</h6>
-                                      <ul>
-                                        {q.evaluation.strengths.map((pt, pIdx) => (
-                                          <li key={pIdx}>{pt}</li>
-                                        ))}
-                                      </ul>
-                                    </div>
-                                  )}
-
-                                  {/* Improvements */}
-                                  {q.evaluation.improvements && q.evaluation.improvements.length > 0 && (
-                                    <div className="eval-breakdown-card eval-improvements-box">
-                                      <h6>📈 Recommended Improvements</h6>
-                                      <ul>
-                                        {q.evaluation.improvements.map((pt, pIdx) => (
-                                          <li key={pIdx}>{pt}</li>
-                                        ))}
-                                      </ul>
-                                    </div>
-                                  )}
-                                </div>
-
-                                {/* Sample / Model Answer */}
-                                {q.evaluation.sample_answer && (
-                                  <div className="detail-sample-answer-card">
-                                    <div className="sample-header">
-                                      <span className="sample-label">💡 Model / Benchmark Answer</span>
-                                      <button
-                                        type="button"
-                                        className="btn btn-secondary btn-sm copy-btn"
-                                        onClick={() => handleCopySample(q.evaluation!.sample_answer, idx)}
-                                      >
-                                        {copiedAnswerIdx === idx ? '✓ Copied!' : '📋 Copy'}
-                                      </button>
-                                    </div>
-                                    <p className="sample-text">{q.evaluation.sample_answer}</p>
-                                  </div>
-                                )}
-                              </div>
-                            )}
-                          </div>
-                        );
-                      })}
+                          )}
+                        </div>
+                      ))}
                     </div>
                   )}
                 </div>
 
-                {/* Modal Footer Actions */}
-                <div className="detail-modal-footer">
-                  {detailSession.status === 'in_progress' && (
-                    <button
-                      type="button"
-                      className="btn btn-primary btn-lg"
-                      onClick={() => navigate(`/practice/${detailSession.session_id}`)}
-                      id="modal-continue-practice-btn"
-                    >
-                      🚀 Open Interactive Practice Room →
-                    </button>
-                  )}
+                <div className="modal-footer-bar">
                   <button
                     type="button"
                     className="btn btn-secondary"
                     onClick={handleCloseDetail}
                     id="modal-close-footer-btn"
                   >
-                    Close Inspection
+                    Close
                   </button>
+
+                  {detailSession.status === 'in_progress' ? (
+                    <button
+                      type="button"
+                      className="btn btn-primary"
+                      onClick={() => navigate(`/practice/${detailSession.session_id}`)}
+                      id="modal-continue-practice-btn"
+                    >
+                      <span>Resume Practice</span>
+                      <ArrowRightIcon size={14} />
+                    </button>
+                  ) : (
+                    <button
+                      type="button"
+                      className="btn btn-primary"
+                      onClick={() => navigate(`/results/${detailSession.session_id}`)}
+                    >
+                      <AwardIcon size={14} />
+                      <span>View Full Results</span>
+                    </button>
+                  )}
                 </div>
-              </div>
+              </>
             ) : null}
           </div>
         </div>

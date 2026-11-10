@@ -1,7 +1,20 @@
-import { useState } from 'react';
+import { useState, useRef, useEffect, type ChangeEvent, type FormEvent } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { createSession, getNextQuestion } from '../../api/sessionService';
 import { generateQuestion } from '../../api/interviewService';
+import { formatApiError, isRequestAborted } from '../../utils/error';
+import { getDifficultyBadgeClass } from '../../utils/format';
+import {
+  SparklesIcon,
+  FileTextIcon,
+  ArrowRightIcon,
+  AlertCircleIcon,
+  RefreshIcon,
+  ChevronDownIcon,
+  CheckIcon,
+  PlayIcon,
+} from '../../components/ui/Icons';
+import LoadingSpinner from '../../components/ui/LoadingSpinner';
 import type {
   CreateSessionRequest,
   ExperienceLevel,
@@ -11,10 +24,8 @@ import type {
   InterviewQuestionResponse,
   SessionDetailResponse,
 } from '../../types';
-import LoadingSpinner from '../../components/ui/LoadingSpinner';
 import './StartInterview.css';
 
-// Popular quick-select presets for instant interview setup
 const POPULAR_ROLES = [
   'Frontend Developer',
   'Backend Developer',
@@ -24,11 +35,11 @@ const POPULAR_ROLES = [
 ];
 
 const POPULAR_TOPICS: Record<string, string[]> = {
-  'Frontend Developer': ['React Hooks & State', 'CSS Grid & Flexbox', 'Browser Performance', 'TypeScript Generics'],
+  'Frontend Developer': ['React Hooks', 'CSS Grid & Flexbox', 'Browser Performance', 'TypeScript Generics'],
   'Backend Developer': ['REST API Design', 'Database Indexing', 'Concurrency & Threads', 'Microservices Architecture'],
   'Full Stack Engineer': ['System Design', 'Authentication & JWT', 'State Management', 'SQL vs NoSQL'],
   'DevOps Engineer': ['CI/CD Pipelines', 'Docker & Containerization', 'Kubernetes Orchestration', 'Infrastructure as Code'],
-  'Data Engineer': ['ETL Pipeline Design', 'Apache Spark', 'Data Warehousing & Star Schema', 'SQL Query Optimization'],
+  'Data Engineer': ['ETL Pipeline Design', 'Apache Spark', 'Data Warehousing', 'SQL Query Optimization'],
 };
 
 const DEFAULT_TOPICS = [
@@ -36,8 +47,9 @@ const DEFAULT_TOPICS = [
   'Data Structures & Algorithms',
   'React Hooks',
   'Database Indexing',
-  'REST & GraphQL APIs',
 ];
+
+const QUESTION_COUNT_OPTIONS = [5, 10, 15, 20] as const;
 
 interface GeneratedResult {
   question: string;
@@ -55,7 +67,6 @@ interface GeneratedResult {
 export default function StartInterview() {
   const navigate = useNavigate();
 
-  // Form state
   const [formData, setFormData] = useState<CreateSessionRequest>({
     role: '',
     experience_level: 'Junior',
@@ -65,25 +76,28 @@ export default function StartInterview() {
     total_questions: 5,
   });
 
-  // Track whether to persist as a full session
   const [persistSession, setPersistSession] = useState(true);
-
-  // Validation errors
   const [errors, setErrors] = useState<{ role?: string; topic?: string }>({});
 
-  // Submission & API state
   const [loading, setLoading] = useState(false);
-  const [loadingStep, setLoadingStep] = useState<string>('');
-  const [apiError, setApiError] = useState<string>('');
-  const [canRetry, setCanRetry] = useState(false);
-
-  // Result state
+  const [loadingStep, setLoadingStep] = useState('');
+  const [apiError, setApiError] = useState('');
   const [result, setResult] = useState<GeneratedResult | null>(null);
   const [showRubric, setShowRubric] = useState(false);
 
-  // Quick chip topics based on selected role
-  const suggestedTopics = POPULAR_TOPICS[formData.role] || DEFAULT_TOPICS;
+  const isSubmittingRef = useRef(false);
+  const abortControllerRef = useRef<AbortController | null>(null);
+  const mountedRef = useRef(true);
 
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+      abortControllerRef.current?.abort();
+    };
+  }, []);
+
+  const suggestedTopics = POPULAR_TOPICS[formData.role] || DEFAULT_TOPICS;
   const experienceLevels: ExperienceLevel[] = ['Fresher', 'Junior', 'Mid-Level', 'Senior'];
   const difficultyLevels: DifficultyLevel[] = ['Easy', 'Medium', 'Hard'];
   const questionTypes: QuestionType[] = ['Technical', 'Scenario-Based', 'Behavioral'];
@@ -98,71 +112,74 @@ export default function StartInterview() {
     }
 
     if (!formData.topic.trim()) {
-      newErrors.topic = 'Topic is required.';
+      newErrors.topic = 'Interview topic is required.';
     } else if (formData.topic.trim().length < 2) {
-      newErrors.topic = 'Topic must be at least 2 characters.';
+      newErrors.topic = 'Interview topic must be at least 2 characters.';
     }
 
     setErrors(newErrors);
     return Object.keys(newErrors).length === 0;
   }
 
-  function handleChange(
-    e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>
-  ) {
+  function handleChange(e: ChangeEvent<HTMLInputElement | HTMLSelectElement>) {
     const { name, value } = e.target;
     setFormData((prev) => ({
       ...prev,
       [name]: name === 'total_questions' ? Number(value) : value,
     }));
 
-    // Clear inline error on change
-    if (errors[name as 'role' | 'topic']) {
+    if (errors[name as keyof typeof errors]) {
       setErrors((prev) => ({ ...prev, [name]: undefined }));
     }
+    setApiError('');
   }
 
   function handleSelectRole(role: string) {
     setFormData((prev) => ({ ...prev, role }));
-    if (errors.role) {
-      setErrors((prev) => ({ ...prev, role: undefined }));
-    }
+    if (errors.role) setErrors((prev) => ({ ...prev, role: undefined }));
+    setApiError('');
   }
 
   function handleSelectTopic(topic: string) {
     setFormData((prev) => ({ ...prev, topic }));
-    if (errors.topic) {
-      setErrors((prev) => ({ ...prev, topic: undefined }));
-    }
+    if (errors.topic) setErrors((prev) => ({ ...prev, topic: undefined }));
+    setApiError('');
   }
 
-  async function handleSubmit(e?: React.FormEvent) {
-    if (e) e.preventDefault();
-    setApiError('');
-    setCanRetry(false);
+  async function runGeneration(forceSession: boolean) {
+    if (isSubmittingRef.current || loading) return;
+    if (!validate()) return;
 
-    if (!validate()) {
-      return;
-    }
+    abortControllerRef.current?.abort();
+    const controller = new AbortController();
+    abortControllerRef.current = controller;
+    const { signal } = controller;
 
+    isSubmittingRef.current = true;
     setLoading(true);
+    setApiError('');
 
     try {
-      if (persistSession) {
-        // Step 1: Initialize database session
-        setLoadingStep('Initializing interview session in database…');
-        const session: SessionDetailResponse = await createSession({
-          role: formData.role.trim(),
-          experience_level: formData.experience_level,
-          difficulty: formData.difficulty,
-          topic: formData.topic.trim(),
-          question_type: formData.question_type,
-          total_questions: formData.total_questions,
-        });
+      if (forceSession) {
+        setLoadingStep('Creating interview session…');
+        const session: SessionDetailResponse = await createSession(
+          {
+            role: formData.role.trim(),
+            experience_level: formData.experience_level,
+            difficulty: formData.difficulty,
+            topic: formData.topic.trim(),
+            question_type: formData.question_type,
+            total_questions: formData.total_questions,
+          },
+          { signal }
+        );
 
-        // Step 2: Generate first question using Qwen 2.5 via Ollama
-        setLoadingStep('Generating tailored question with local AI (Qwen 2.5)…');
-        const qData: SessionNextQuestionResponse = await getNextQuestion(session.session_id);
+        if (!mountedRef.current || signal.aborted) return;
+
+        setLoadingStep('Generating first interview question via Ollama…');
+        const qData: SessionNextQuestionResponse = await getNextQuestion(session.session_id, { signal });
+
+        if (!mountedRef.current || signal.aborted) return;
 
         setResult({
           question: qData.question,
@@ -177,15 +194,19 @@ export default function StartInterview() {
           totalQuestions: qData.total_questions,
         });
       } else {
-        // Standalone question generation
-        setLoadingStep('Generating question with local AI (Qwen 2.5)…');
-        const qData: InterviewQuestionResponse = await generateQuestion({
-          role: formData.role.trim(),
-          experience_level: formData.experience_level,
-          difficulty: formData.difficulty,
-          topic: formData.topic.trim(),
-          question_type: formData.question_type,
-        });
+        setLoadingStep('Generating interview question via Ollama…');
+        const qData: InterviewQuestionResponse = await generateQuestion(
+          {
+            role: formData.role.trim(),
+            experience_level: formData.experience_level,
+            difficulty: formData.difficulty,
+            topic: formData.topic.trim(),
+            question_type: formData.question_type,
+          },
+          { signal }
+        );
+
+        if (!mountedRef.current || signal.aborted) return;
 
         setResult({
           question: qData.question,
@@ -198,37 +219,22 @@ export default function StartInterview() {
         });
       }
     } catch (err: unknown) {
-      setCanRetry(true);
-      let errorMsg = 'Failed to generate question. Check if the backend and Ollama are running.';
-      if (err && typeof err === 'object') {
-        if ('response' in err) {
-          const axiosErr = err as { response?: { status?: number; data?: { detail?: string } } };
-          const status = axiosErr.response?.status;
-          const detail = axiosErr.response?.data?.detail;
-
-          if (status === 503) {
-            errorMsg = detail || 'AI service unavailable: Please verify Ollama is running with qwen2.5:1.5b.';
-          } else if (status === 502) {
-            errorMsg = detail || 'AI model error: Failed to generate a valid question response.';
-          } else if (detail) {
-            errorMsg = detail;
-          }
-        } else if ('message' in err && typeof (err as { message: unknown }).message === 'string') {
-          const msg = (err as { message: string }).message;
-          if (msg.includes('timeout') || msg.includes('timed out')) {
-            errorMsg = 'Request timed out waiting for the local AI model. Ollama may be loading the model or busy.';
-          } else if (msg.includes('Network Error')) {
-            errorMsg = 'Network error: Cannot reach the backend API. Please verify the FastAPI server is running on port 8000.';
-          } else {
-            errorMsg = msg;
-          }
-        }
-      }
-      setApiError(errorMsg);
+      if (!mountedRef.current || isRequestAborted(err)) return;
+      setApiError(
+        formatApiError(err, 'Failed to generate question. Check that FastAPI and Ollama are running.')
+      );
     } finally {
-      setLoading(false);
-      setLoadingStep('');
+      if (mountedRef.current) {
+        isSubmittingRef.current = false;
+        setLoading(false);
+        setLoadingStep('');
+      }
     }
+  }
+
+  function handleSubmit(e: FormEvent) {
+    e.preventDefault();
+    void runGeneration(persistSession);
   }
 
   function handleReset() {
@@ -238,395 +244,367 @@ export default function StartInterview() {
   }
 
   return (
-    <div className="start-interview animate-fade-in" id="start-interview-page">
-      <div className="start-header">
-        <h2 className="start-title">
-          Configure Your <span className="gradient-text">Interview Session</span>
-        </h2>
-        <p className="start-subtitle">
-          Select your target role, experience, and domain. Our local AI will craft an authentic,
-          tailored interview question designed to test real-world depth.
-        </p>
+    <div className="page-container-narrow animate-fade-in" id="start-interview-page">
+      <div className="page-header">
+        <div className="page-header-text">
+          <h2 className="page-title">Configure AI Interview</h2>
+          <p className="page-subtitle">
+            Set your target role, technical focus, and difficulty to start an interactive interview session.
+          </p>
+        </div>
+
+        <button
+          type="button"
+          className="btn btn-secondary btn-sm"
+          onClick={() => navigate('/rag')}
+          id="hero-switch-rag-btn"
+        >
+          <FileTextIcon size={14} />
+          <span>Use Document or GitHub RAG</span>
+          <ArrowRightIcon size={13} />
+        </button>
       </div>
 
-      {/* If a question was successfully generated, display it */}
       {result ? (
-        <div className="question-result-container animate-fade-in" id="question-result-card">
-          <div className="result-card glass-card">
-            {/* Header / Badges */}
-            <div className="result-header">
-              <div className="result-meta-badges">
-                <span className={`badge badge-diff badge-diff-${result.difficulty.toLowerCase()}`} id="result-difficulty-badge">
-                  {result.difficulty}
-                </span>
-                <span className="badge badge-info" id="result-type-badge">
-                  {result.questionType}
-                </span>
-                <span className="badge badge-neutral" id="result-level-badge">
-                  {result.experienceLevel}
-                </span>
-                <span className="badge badge-primary" id="result-topic-badge">
-                  📌 {result.topic}
-                </span>
-              </div>
-
-              {result.sessionId && (
-                <div className="result-session-tag">
-                  <span className="session-indicator-dot"></span>
-                  Session Question {result.questionNumber} of {result.totalQuestions}
-                </div>
-              )}
+        <div className="surface-card start-result-card animate-fade-in" id="question-result-card">
+          <div className="start-result-header">
+            <div className="start-result-badges">
+              <span className={`badge ${getDifficultyBadgeClass(result.difficulty)}`}>
+                {result.difficulty}
+              </span>
+              <span className="badge badge-info">{result.questionType}</span>
+              <span className="badge badge-neutral">{result.experienceLevel}</span>
+              <span className="badge badge-primary">{result.topic}</span>
             </div>
 
-            {/* Question Text */}
-            <div className="result-question-body">
-              <span className="result-label">Generated Interview Question</span>
-              <h3 className="result-question-text" id="generated-question-text">
-                {result.question}
-              </h3>
+            {result.sessionId && (
+              <span className="badge badge-neutral">
+                Question {result.questionNumber} of {result.totalQuestions}
+              </span>
+            )}
+          </div>
+
+          <div className="start-result-question">
+            <span className="result-eyebrow">Generated Interview Question</span>
+            <h3 className="result-question-headline" id="generated-question-text">
+              {result.question}
+            </h3>
+          </div>
+
+          {result.followUpQuestion && (
+            <div className="start-followup-box" id="follow-up-card">
+              <span className="followup-label">Follow-up Probe</span>
+              <p className="followup-body">{result.followUpQuestion}</p>
             </div>
+          )}
 
-            {/* Follow-up question if provided */}
-            {result.followUpQuestion && (
-              <div className="result-followup glass-card" id="follow-up-card">
-                <div className="followup-header">
-                  <span className="followup-icon">💡</span>
-                  <span className="followup-title">Interviewer Follow-up Probe</span>
-                </div>
-                <p className="followup-text" id="follow-up-text">
-                  {result.followUpQuestion}
-                </p>
-                <span className="followup-note">
-                  Be prepared to address this probe after your initial response.
-                </span>
-              </div>
-            )}
-
-            {/* Expected Answer Points (Hidden Evaluation Rubric) */}
-            {result.expectedAnswerPoints && result.expectedAnswerPoints.length > 0 && (
-              <div className="rubric-disclosure" id="rubric-disclosure">
-                <button
-                  type="button"
-                  className="rubric-toggle-btn"
-                  onClick={() => setShowRubric((prev) => !prev)}
-                  id="toggle-rubric-btn"
-                  aria-expanded={showRubric}
-                >
-                  <span>{showRubric ? '🔒 Hide' : '👁️ View'} Evaluation Criteria (Interviewer Guide)</span>
-                  <span className={`rubric-arrow ${showRubric ? 'open' : ''}`}>▼</span>
-                </button>
-
-                {showRubric && (
-                  <div className="rubric-content animate-fade-in" id="rubric-content">
-                    <p className="rubric-warning">
-                      ⚠️ <em>Hidden during practice to simulate authentic interview pressure.</em> The AI grader evaluates your answer against these key points:
-                    </p>
-                    <ul className="rubric-list">
-                      {result.expectedAnswerPoints.map((point, idx) => (
-                        <li key={idx} className="rubric-item">
-                          <span className="rubric-check">✓</span>
-                          <span>{point}</span>
-                        </li>
-                      ))}
-                    </ul>
-                  </div>
-                )}
-              </div>
-            )}
-
-            {/* Action Bar */}
-            <div className="result-actions">
-              {result.sessionId ? (
-                <button
-                  type="button"
-                  className="btn btn-primary btn-lg result-cta-btn"
-                  onClick={() => navigate(`/practice/${result.sessionId}`)}
-                  id="go-to-practice-btn"
-                >
-                  🚀 Enter Interactive Practice Room →
-                </button>
-              ) : (
-                <button
-                  type="button"
-                  className="btn btn-primary btn-lg result-cta-btn"
-                  onClick={() => {
-                    setPersistSession(true);
-                    handleSubmit();
-                  }}
-                  id="convert-to-session-btn"
-                >
-                  💾 Save to Session & Practice
-                </button>
-              )}
-
+          {result.expectedAnswerPoints && result.expectedAnswerPoints.length > 0 && (
+            <div className="start-rubric-box">
               <button
                 type="button"
-                className="btn btn-secondary"
-                onClick={handleReset}
-                id="generate-another-btn"
+                className="rubric-disclosure-btn"
+                onClick={() => setShowRubric((prev) => !prev)}
+                aria-expanded={showRubric}
               >
-                ⚙️ Configure New Question
+                <span>
+                  {showRubric ? 'Hide' : 'View'} Evaluation Criteria ({result.expectedAnswerPoints.length})
+                </span>
+                <ChevronDownIcon
+                  size={15}
+                  style={{
+                    transform: showRubric ? 'rotate(180deg)' : 'none',
+                    transition: 'transform 150ms ease',
+                  }}
+                />
               </button>
+
+              {showRubric && (
+                <ul className="rubric-criteria-list animate-fade-in">
+                  {result.expectedAnswerPoints.map((point, idx) => (
+                    <li key={idx}>
+                      <CheckIcon size={14} />
+                      <span>{point}</span>
+                    </li>
+                  ))}
+                </ul>
+              )}
             </div>
+          )}
+
+          <div className="start-result-actions">
+            {result.sessionId ? (
+              <button
+                type="button"
+                className="btn btn-primary btn-lg"
+                onClick={() => navigate(`/practice/${result.sessionId}`)}
+                id="go-to-practice-btn"
+              >
+                <PlayIcon size={15} />
+                <span>Enter Practice Room</span>
+              </button>
+            ) : (
+              <button
+                type="button"
+                className="btn btn-primary btn-lg"
+                onClick={() => {
+                  setPersistSession(true);
+                  void runGeneration(true);
+                }}
+                id="convert-to-session-btn"
+              >
+                <PlayIcon size={15} />
+                <span>Create Session & Practice</span>
+              </button>
+            )}
+
+            <button
+              type="button"
+              className="btn btn-secondary"
+              onClick={handleReset}
+              id="generate-another-btn"
+            >
+              Configure Another
+            </button>
           </div>
         </div>
       ) : (
-        /* Configuration Form */
-        <form className="session-form glass-card" onSubmit={handleSubmit} id="session-form" noValidate>
-          {/* Row 1: Role */}
-          <div className="form-group">
-            <div className="label-with-hint">
-              <label htmlFor="role" className="form-label">Job Role *</label>
-              <span className="field-hint">e.g. Frontend Developer, Backend Engineer</span>
-            </div>
-            <input
-              type="text"
-              id="role"
-              name="role"
-              className={`form-input ${errors.role ? 'input-error' : ''}`}
-              placeholder="Enter target job role…"
-              value={formData.role}
-              onChange={handleChange}
-              maxLength={100}
-              disabled={loading}
-              required
-            />
-            {errors.role && (
-              <span className="field-error" id="role-error" role="alert">
-                {errors.role}
-              </span>
-            )}
-
-            {/* Quick role presets */}
-            <div className="quick-chips">
-              <span className="quick-chips-label">Quick select:</span>
-              {POPULAR_ROLES.map((r) => (
-                <button
-                  key={r}
-                  type="button"
-                  className={`chip ${formData.role === r ? 'chip-active' : ''}`}
-                  onClick={() => handleSelectRole(r)}
-                  disabled={loading}
-                >
-                  {r}
-                </button>
-              ))}
-            </div>
-          </div>
-
-          {/* Row 2: Topic */}
-          <div className="form-group">
-            <div className="label-with-hint">
-              <label htmlFor="topic" className="form-label">Interview Topic *</label>
-              <span className="field-hint">Specific technology or domain concept</span>
-            </div>
-            <input
-              type="text"
-              id="topic"
-              name="topic"
-              className={`form-input ${errors.topic ? 'input-error' : ''}`}
-              placeholder="e.g. React Hooks, System Design, SQL Indexing…"
-              value={formData.topic}
-              onChange={handleChange}
-              maxLength={100}
-              disabled={loading}
-              required
-            />
-            {errors.topic && (
-              <span className="field-error" id="topic-error" role="alert">
-                {errors.topic}
-              </span>
-            )}
-
-            {/* Quick topic presets */}
-            <div className="quick-chips">
-              <span className="quick-chips-label">Suggested topics:</span>
-              {suggestedTopics.map((t) => (
-                <button
-                  key={t}
-                  type="button"
-                  className={`chip ${formData.topic === t ? 'chip-active' : ''}`}
-                  onClick={() => handleSelectTopic(t)}
-                  disabled={loading}
-                >
-                  {t}
-                </button>
-              ))}
-            </div>
-          </div>
-
-          {/* Row 3: Experience + Difficulty */}
-          <div className="form-row">
+        <form className="start-config-form" onSubmit={handleSubmit} id="session-form" noValidate>
+          <div className="surface-card config-panel">
+            {/* Role */}
             <div className="form-group">
-              <label htmlFor="experience_level" className="form-label">
-                Experience Level
-              </label>
-              <select
-                id="experience_level"
-                name="experience_level"
-                className="form-select"
-                value={formData.experience_level}
-                onChange={handleChange}
-                disabled={loading}
-              >
-                {experienceLevels.map((level) => (
-                  <option key={level} value={level}>
-                    {level} {level === 'Fresher' ? '(0–1 yrs)' : level === 'Junior' ? '(1–2 yrs)' : level === 'Mid-Level' ? '(3–5 yrs)' : '(5+ yrs)'}
-                  </option>
-                ))}
-              </select>
-            </div>
-
-            <div className="form-group">
-              <label htmlFor="difficulty" className="form-label">
-                Difficulty Level
-              </label>
-              <select
-                id="difficulty"
-                name="difficulty"
-                className="form-select"
-                value={formData.difficulty}
-                onChange={handleChange}
-                disabled={loading}
-              >
-                {difficultyLevels.map((level) => (
-                  <option key={level} value={level}>
-                    {level} {level === 'Easy' ? '🟢' : level === 'Medium' ? '🟡' : '🔴'}
-                  </option>
-                ))}
-              </select>
-            </div>
-          </div>
-
-          {/* Row 4: Question Type */}
-          <div className="form-group">
-            <label htmlFor="question_type" className="form-label">
-              Question Type
-            </label>
-            <div className="question-type-grid">
-              {questionTypes.map((type) => (
-                <label
-                  key={type}
-                  className={`type-radio-card ${formData.question_type === type ? 'type-radio-selected' : ''}`}
-                >
-                  <input
-                    type="radio"
-                    name="question_type"
-                    value={type}
-                    checked={formData.question_type === type}
-                    onChange={handleChange}
-                    disabled={loading}
-                    className="visually-hidden"
-                  />
-                  <span className="type-title">
-                    {type === 'Technical' && '💻 Technical'}
-                    {type === 'Scenario-Based' && '🏗️ Scenario-Based'}
-                    {type === 'Behavioral' && '🤝 Behavioral'}
-                  </span>
-                  <span className="type-desc">
-                    {type === 'Technical' && 'Core algorithms, language internals & APIs'}
-                    {type === 'Scenario-Based' && 'Architecture trade-offs, debugging & scale'}
-                    {type === 'Behavioral' && 'Team dynamics, leadership & past impact'}
-                  </span>
+              <div className="label-row">
+                <label htmlFor="role" className="form-label">
+                  Target Job Role <span className="required-mark">*</span>
                 </label>
-              ))}
-            </div>
-          </div>
-
-          {/* Row 5: Session Persistence & Question Count */}
-          <div className="session-options-box glass-card">
-            <div className="session-toggle-row">
-              <label className="checkbox-container" htmlFor="persist-session-toggle">
-                <input
-                  type="checkbox"
-                  id="persist-session-toggle"
-                  checked={persistSession}
-                  onChange={(e) => setPersistSession(e.target.checked)}
-                  disabled={loading}
-                />
-                <span className="checkbox-checkmark"></span>
-                <span className="checkbox-label">
-                  <strong>Track Interview Session</strong> — Save question history and progress to database
+                <span className="form-hint">e.g. Backend Developer, Full Stack Engineer</span>
+              </div>
+              <input
+                type="text"
+                id="role"
+                name="role"
+                className={`form-input ${errors.role ? 'input-error' : ''}`}
+                placeholder="Enter target job role…"
+                value={formData.role}
+                onChange={handleChange}
+                maxLength={100}
+                disabled={loading}
+                required
+              />
+              {errors.role && (
+                <span className="field-error-text" role="alert">
+                  <AlertCircleIcon size={13} />
+                  <span>{errors.role}</span>
                 </span>
-              </label>
+              )}
+
+              <div className="chip-row">
+                <span className="chip-row-label">Popular:</span>
+                {POPULAR_ROLES.map((r) => (
+                  <button
+                    key={r}
+                    type="button"
+                    className={`select-chip ${formData.role === r ? 'is-active' : ''}`}
+                    onClick={() => handleSelectRole(r)}
+                    disabled={loading}
+                  >
+                    {r}
+                  </button>
+                ))}
+              </div>
             </div>
 
-            {persistSession && (
-              <div className="form-group questions-slider-group animate-fade-in">
-                <div className="slider-header">
-                  <label htmlFor="total_questions" className="form-label">
-                    Total Session Questions
-                  </label>
-                  <span className="slider-value-pill">{formData.total_questions} Questions</span>
-                </div>
-                <input
-                  type="range"
-                  id="total_questions"
-                  name="total_questions"
-                  className="form-range"
-                  min={1}
-                  max={20}
-                  value={formData.total_questions}
+            <div className="panel-divider" />
+
+            {/* Topic */}
+            <div className="form-group">
+              <div className="label-row">
+                <label htmlFor="topic" className="form-label">
+                  Interview Topic <span className="required-mark">*</span>
+                </label>
+                <span className="form-hint">Core skill, technology, or architecture area</span>
+              </div>
+              <input
+                type="text"
+                id="topic"
+                name="topic"
+                className={`form-input ${errors.topic ? 'input-error' : ''}`}
+                placeholder="e.g. System Design, React Hooks, Database Indexing…"
+                value={formData.topic}
+                onChange={handleChange}
+                maxLength={100}
+                disabled={loading}
+                required
+              />
+              {errors.topic && (
+                <span className="field-error-text" role="alert">
+                  <AlertCircleIcon size={13} />
+                  <span>{errors.topic}</span>
+                </span>
+              )}
+
+              <div className="chip-row">
+                <span className="chip-row-label">Suggested:</span>
+                {suggestedTopics.map((t) => (
+                  <button
+                    key={t}
+                    type="button"
+                    className={`select-chip ${formData.topic === t ? 'is-active' : ''}`}
+                    onClick={() => handleSelectTopic(t)}
+                    disabled={loading}
+                  >
+                    {t}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <div className="panel-divider" />
+
+            {/* Experience & Difficulty */}
+            <div className="two-col-grid">
+              <div className="form-group">
+                <label htmlFor="experience_level" className="form-label">
+                  Experience Level
+                </label>
+                <select
+                  id="experience_level"
+                  name="experience_level"
+                  className="form-select"
+                  value={formData.experience_level}
                   onChange={handleChange}
                   disabled={loading}
-                />
-                <div className="range-labels">
-                  <span>1 (Quick test)</span>
-                  <span>5 (Standard)</span>
-                  <span>10 (Full mock)</span>
-                  <span>20 (Marathon)</span>
+                >
+                  {experienceLevels.map((level) => (
+                    <option key={level} value={level}>
+                      {level}{' '}
+                      {level === 'Fresher'
+                        ? '(0–1 yrs)'
+                        : level === 'Junior'
+                        ? '(1–2 yrs)'
+                        : level === 'Mid-Level'
+                        ? '(3–5 yrs)'
+                        : '(5+ yrs)'}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="form-group">
+                <label htmlFor="difficulty" className="form-label">
+                  Difficulty Level
+                </label>
+                <select
+                  id="difficulty"
+                  name="difficulty"
+                  className="form-select"
+                  value={formData.difficulty}
+                  onChange={handleChange}
+                  disabled={loading}
+                >
+                  {difficultyLevels.map((level) => (
+                    <option key={level} value={level}>
+                      {level}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            </div>
+
+            <div className="panel-divider" />
+
+            {/* Question Category & Question Count */}
+            <div className="two-col-grid">
+              <div className="form-group">
+                <span className="form-label">Question Category</span>
+                <div className="segmented-control" role="radiogroup" aria-label="Question Category">
+                  {questionTypes.map((type) => (
+                    <button
+                      key={type}
+                      type="button"
+                      role="radio"
+                      aria-checked={formData.question_type === type}
+                      className={`segment-btn ${formData.question_type === type ? 'is-active' : ''}`}
+                      onClick={() => setFormData((prev) => ({ ...prev, question_type: type }))}
+                      disabled={loading}
+                    >
+                      {type}
+                    </button>
+                  ))}
                 </div>
               </div>
-            )}
+
+              <div className="form-group">
+                <span className="form-label">Number of Questions</span>
+                <div className="segmented-control" role="radiogroup" aria-label="Number of Questions">
+                  {QUESTION_COUNT_OPTIONS.map((cnt) => (
+                    <button
+                      key={cnt}
+                      type="button"
+                      role="radio"
+                      aria-checked={formData.total_questions === cnt}
+                      className={`segment-btn ${formData.total_questions === cnt ? 'is-active' : ''}`}
+                      onClick={() => setFormData((prev) => ({ ...prev, total_questions: cnt }))}
+                      disabled={loading}
+                    >
+                      {cnt}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </div>
           </div>
 
-          {/* Loading indicator */}
           {loading && (
-            <div className="generating-indicator glass-card animate-fade-in" id="generation-spinner">
-              <LoadingSpinner message={loadingStep || 'AI is crafting your interview question…'} size="md" />
-              <p className="generating-subtext">
-                Using local <strong>Qwen 2.5</strong> on Ollama. Structured JSON generation takes ~5–15 seconds.
-              </p>
+            <div className="surface-card start-loading-card animate-fade-in" id="generation-spinner">
+              <LoadingSpinner
+                message={loadingStep || 'Generating interview question…'}
+                subtext="Local AI inference with Ollama typically takes a few seconds."
+                size="md"
+              />
             </div>
           )}
 
-          {/* Error Banner with Retry */}
           {apiError && !loading && (
-            <div className="form-error" role="alert" id="form-error">
-              <div className="error-icon-box">⚠️</div>
-              <div className="error-content-box">
-                <strong>Question Generation Error:</strong>
-                <p>{apiError}</p>
-                {canRetry && (
+            <div className="alert-banner alert-banner-error animate-fade-in" role="alert" id="form-error">
+              <AlertCircleIcon size={18} style={{ flexShrink: 0, marginTop: 1 }} />
+              <div className="alert-banner-body">
+                <div className="alert-banner-title">Question generation failed</div>
+                <div>{apiError}</div>
+                <div className="alert-banner-actions">
                   <button
                     type="button"
-                    className="btn btn-secondary btn-sm retry-btn"
-                    onClick={() => handleSubmit()}
+                    className="btn btn-secondary btn-sm"
+                    onClick={() => void runGeneration(persistSession)}
                     id="retry-generation-btn"
                   >
-                    🔄 Retry Generation
+                    <RefreshIcon size={13} />
+                    <span>Retry</span>
                   </button>
-                )}
+                </div>
               </div>
             </div>
           )}
 
-          {/* Submit Button */}
-          <button
-            type="submit"
-            className="btn btn-primary btn-lg start-submit-btn"
-            disabled={loading}
-            id="create-session-btn"
-          >
-            {loading ? (
-              <>
-                <span className="btn-spinner"></span>
-                Generating AI Question…
-              </>
-            ) : (
-              <>✨ Generate AI Question & Start Practice</>
-            )}
-          </button>
+          <div className="start-submit-row">
+            <button
+              type="submit"
+              className="btn btn-primary btn-lg start-submit-btn"
+              disabled={loading}
+              id="create-session-btn"
+            >
+              {loading ? (
+                <>
+                  <span className="btn-spinner" aria-hidden="true" />
+                  <span>Preparing Interview…</span>
+                </>
+              ) : (
+                <>
+                  <SparklesIcon size={16} />
+                  <span>Start Interview</span>
+                </>
+              )}
+            </button>
+          </div>
         </form>
       )}
     </div>

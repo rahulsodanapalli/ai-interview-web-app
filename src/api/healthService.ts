@@ -15,21 +15,41 @@ import type {
 } from '../types';
 
 const HEALTH_PREFIX = '/api/v1/health';
+const HEALTH_TIMEOUT_MS = 10_000;
+
+export interface ApiRequestOptions {
+  signal?: AbortSignal;
+}
 
 /** Check backend health status */
-export async function getBackendHealth(): Promise<HealthCheckResponse> {
-  const response = await apiClient.get<HealthCheckResponse>(HEALTH_PREFIX);
+export async function getBackendHealth(
+  options?: ApiRequestOptions
+): Promise<HealthCheckResponse> {
+  const response = await apiClient.get<HealthCheckResponse>(HEALTH_PREFIX, {
+    signal: options?.signal,
+    timeout: HEALTH_TIMEOUT_MS,
+  });
   return response.data;
 }
 
 /** Check Ollama LLM service health */
-export async function getOllamaHealth(): Promise<OllamaHealthResponse> {
-  const response = await apiClient.get<OllamaHealthResponse>(`${HEALTH_PREFIX}/ollama`);
+export async function getOllamaHealth(
+  options?: ApiRequestOptions
+): Promise<OllamaHealthResponse> {
+  const response = await apiClient.get<OllamaHealthResponse>(`${HEALTH_PREFIX}/ollama`, {
+    signal: options?.signal,
+    timeout: HEALTH_TIMEOUT_MS,
+  });
   return response.data;
 }
 
 /** Check database connectivity health */
-export async function getDatabaseHealth(): Promise<DatabaseHealthResponse> {
-  const response = await apiClient.get<DatabaseHealthResponse>(`${HEALTH_PREFIX}/db`);
+export async function getDatabaseHealth(
+  options?: ApiRequestOptions
+): Promise<DatabaseHealthResponse> {
+  const response = await apiClient.get<DatabaseHealthResponse>(`${HEALTH_PREFIX}/db`, {
+    signal: options?.signal,
+    timeout: HEALTH_TIMEOUT_MS,
+  });
   return response.data;
 }

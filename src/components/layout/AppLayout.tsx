@@ -1,3 +1,4 @@
+import { useState, useCallback } from 'react';
 import { Outlet } from 'react-router-dom';
 import Sidebar from './Sidebar';
 import Header from './Header';
@@ -5,14 +6,38 @@ import './AppLayout.css';
 
 /**
  * Root layout component that wraps all pages.
- * Provides the sidebar navigation, sticky header, and scrollable content area.
+ * Manages sidebar collapse state and mobile drawer state cleanly without overlapping content.
  */
 export default function AppLayout() {
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+
+  const handleToggleCollapse = useCallback(() => {
+    setSidebarCollapsed((prev) => !prev);
+  }, []);
+
+  const handleOpenMobileMenu = useCallback(() => {
+    setMobileMenuOpen(true);
+  }, []);
+
+  const handleCloseMobileMenu = useCallback(() => {
+    setMobileMenuOpen(false);
+  }, []);
+
   return (
-    <div className="app-layout" id="app-layout">
-      <Sidebar />
+    <div
+      className={`app-layout ${sidebarCollapsed ? 'sidebar-is-collapsed' : ''}`}
+      id="app-layout"
+    >
+      <Sidebar
+        collapsed={sidebarCollapsed}
+        mobileOpen={mobileMenuOpen}
+        onToggleCollapse={handleToggleCollapse}
+        onCloseMobile={handleCloseMobileMenu}
+      />
+
       <div className="app-main">
-        <Header />
+        <Header onOpenMobileMenu={handleOpenMobileMenu} />
         <main className="app-content">
           <Outlet />
         </main>

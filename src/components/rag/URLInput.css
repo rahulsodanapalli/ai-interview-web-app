@@ -1,0 +1,102 @@
+.url-source-root {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.url-input-control {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.url-leading-icon {
+  position: absolute;
+  left: 12px;
+  color: var(--text-muted);
+  display: flex;
+  align-items: center;
+  pointer-events: none;
+}
+
+.url-field-input {
+  padding-left: 36px;
+  padding-right: 34px;
+}
+
+.url-clear-btn {
+  position: absolute;
+  right: 8px;
+  width: 24px;
+  height: 24px;
+  border-radius: var(--radius-sm);
+  border: none;
+  background: transparent;
+  color: var(--text-muted);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+}
+
+.url-clear-btn:hover {
+  background: var(--surface-subtle);
+  color: var(--text-primary);
+}
+
+.url-valid-hint {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.75rem;
+  font-weight: 500;
+  color: var(--color-success-text);
+}
+
+.url-examples-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.url-examples-label {
+  font-size: 0.75rem;
+  color: var(--text-muted);
+  font-weight: 500;
+}
+
+.url-examples-list {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.url-example-chip {
+  height: 26px;
+  padding: 0 10px;
+  border-radius: var(--radius-full);
+  border: 1px solid var(--border-default);
+  background: var(--surface-subtle);
+  color: var(--text-secondary);
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  cursor: pointer;
+  transition: border-color var(--transition-fast), color var(--transition-fast), background-color var(--transition-fast);
+}
+
+.url-example-chip:hover:not(:disabled) {
+  border-color: var(--border-hover);
+  color: var(--text-primary);
+}
+
+.url-example-chip.is-active {
+  border-color: var(--color-primary-500);
+  background: rgba(99, 102, 241, 0.1);
+  color: var(--color-primary-600);
+}
+
+[data-theme="dark"] .url-example-chip.is-active {
+  color: var(--color-primary-300);
+}

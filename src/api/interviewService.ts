@@ -13,27 +13,33 @@ import type {
   InterviewEvaluationRequest,
   InterviewEvaluationResponse,
 } from '../types';
+import type { ApiRequestOptions } from './healthService';
 
 const INTERVIEW_PREFIX = '/api/v1/interview';
+const LONG_TIMEOUT_MS = 150_000;
 
 /** Generate a tailored interview question */
 export async function generateQuestion(
-  payload: InterviewQuestionRequest
+  payload: InterviewQuestionRequest,
+  options?: ApiRequestOptions
 ): Promise<InterviewQuestionResponse> {
   const response = await apiClient.post<InterviewQuestionResponse>(
     `${INTERVIEW_PREFIX}/question`,
-    payload
+    payload,
+    { signal: options?.signal, timeout: LONG_TIMEOUT_MS }
   );
   return response.data;
 }
 
 /** Evaluate a candidate's answer against expected criteria */
 export async function evaluateAnswer(
-  payload: InterviewEvaluationRequest
+  payload: InterviewEvaluationRequest,
+  options?: ApiRequestOptions
 ): Promise<InterviewEvaluationResponse> {
   const response = await apiClient.post<InterviewEvaluationResponse>(
     `${INTERVIEW_PREFIX}/evaluate`,
-    payload
+    payload,
+    { signal: options?.signal, timeout: LONG_TIMEOUT_MS }
   );
   return response.data;
 }

@@ -1,0 +1,47 @@
+.readme-card {
+  overflow: hidden;
+}
+
+.readme-top-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 12px 18px;
+  border-bottom: 1px solid var(--border-default);
+  background: var(--surface-subtle);
+  flex-wrap: wrap;
+}
+
+.readme-file-meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  color: var(--text-secondary);
+}
+
+.readme-filename {
+  font-family: var(--font-mono);
+  font-size: 0.8125rem;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.readme-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.readme-body-scroll {
+  padding: 20px 24px;
+  max-height: 600px;
+  overflow-y: auto;
+}
+
+@media (max-width: 600px) {
+  .readme-body-scroll {
+    padding: 16px;
+  }
+}

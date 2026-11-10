@@ -1,26 +1,36 @@
+import { AlertCircleIcon, RefreshIcon } from './Icons';
 import './ErrorDisplay.css';
 
 interface ErrorDisplayProps {
-  /** The error message to show */
+  title?: string;
   message: string;
-  /** Optional retry callback */
   onRetry?: () => void;
+  retryLabel?: string;
 }
 
-/**
- * Reusable error state display with optional retry button.
- */
-export default function ErrorDisplay({ message, onRetry }: ErrorDisplayProps) {
+export default function ErrorDisplay({
+  title = 'Unable to load content',
+  message,
+  onRetry,
+  retryLabel = 'Try again',
+}: ErrorDisplayProps) {
   return (
-    <div className="error-display animate-fade-in" role="alert" id="error-display">
-      <div className="error-icon">⚠️</div>
-      <h3 className="error-title">Something went wrong</h3>
-      <p className="error-message">{message}</p>
-      {onRetry && (
-        <button className="btn btn-secondary btn-sm" onClick={onRetry} id="error-retry-btn">
-          Try Again
-        </button>
-      )}
+    <div className="error-display surface-card animate-fade-in" role="alert" id="error-display">
+      <div className="error-display-icon">
+        <AlertCircleIcon size={20} />
+      </div>
+      <div className="error-display-body">
+        <h3 className="error-title">{title}</h3>
+        <p className="error-message">{message}</p>
+        {onRetry && (
+          <div className="error-display-actions">
+            <button type="button" className="btn btn-secondary btn-sm" onClick={onRetry} id="error-retry-btn">
+              <RefreshIcon size={14} />
+              <span>{retryLabel}</span>
+            </button>
+          </div>
+        )}
+      </div>
     </div>
   );
 }
